@@ -1,0 +1,65 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ekmchiu
+
+//@version=5
+indicator("My Notes", overlay=true)
+
+// function for left side of the label
+f_print_left(_text) =>
+    var _label = label.new(bar_index, na, _text, xloc.bar_index, yloc.price, color(na), label.style_label_right, color.green, size.large, text.align_right)
+    label.set_xy(_label, bar_index, 0)
+    label.set_text(_label, _text)
+
+// function for right side of the label
+f_print_right(_text) =>
+    var _label = label.new(bar_index, na, _text, xloc.bar_index, yloc.price, color(na), label.style_label_left, color.red, size.large, text.align_left)
+    label.set_xy(_label, bar_index, 0)
+    label.set_text(_label, _text)
+
+f_switch_text() =>
+
+    string i_strategy = input.string('1st', 'Notes', inline='12', options=['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th', '13th'])
+    string i_tableYpos = input.string('bottom', 'Position Y', inline='13', options=['top', 'middle', 'bottom'])
+    string i_tableXpos = input.string('left', 'Position X', inline='13', options=['left', 'center', 'right'])
+    int i_height = input.int(100, 'Height', minval=1, maxval=200, inline='14')
+    int i_width = input.int(170, 'Width', minval=1, maxval=200, inline='14', tooltip='1-200')
+    color i_c_text = input.color(color.new(color.red, 0), 'Text', inline='15')
+    string i_textSize = input.string('large', 'Size', inline='45', options=['tiny', 'small', 'normal', 'large', 'huge', 'auto'])
+    string i_textHAlign = input.string('left', 'Horizontal Align', inline='46', options=['left', 'center', 'right'])
+    string i_textVAlign = input.string('bottom', 'Vertical Align', inline='46', options=['top', 'middle', 'bottom'])
+    color i_c_bg = input(color.new(color.white, 10), 'Background')
+
+    var _txt = ''
+    if i_strategy == '1st'
+        _txt := '技術要點\n' + '- 方向\n' + '- 位置\n' + '- 打破慣性\n' + '實際操作\n' + '- 針對恆指\n' + '- 09:15 - 12:00 (只玩早上)\n' + '- 只準打兩槍，第一槍贏可考慮收工 / 第二槍用利潤玩\n' + '- 八字真言:-心態穩定，風險管理\n' + '交易員是等待對我方有利的情況才入市，期望值最高。\n'
+    if i_strategy == '2nd'
+        _txt := '維度1:-\n' + '1. 順勢而為(市場狀態)\n' + '2. 擇地而蹈(價格位置)\n' + '3. 擇時後動(出入市)\n'
+    if i_strategy == '3rd'
+        _txt := '1.  [] 價格互換區(主動)\n' + '2.  [] 突破區(主動)\n' + '3.  [] 黃金比率 - 回調與延伸 (被動)\n' + '    1.  [] 黃金比率回調  -  只用明顯力量\n' + '    2.  [] 黃金比率延伸  -  \n' + '        1. 只適用於趨勢\n' + '        2. 即是回調不過80%\n' + '        3. 是力量回調完成後的預估\n' + '4.  [] 強度\n' + '    1.  [] 次數\n' + '    2.  [] 速度\n' + '    3.  [] 清晰\n' + '    4.  [] 多條件共鳴\n'
+    if i_strategy == '4th'
+        _txt := '5. 市場狀態\n' + '    1.  [] 趨勢操作要點\n' + '        1.  [] 回調買趨勢\n' + '        2.  [] 延續突破\n' + '        3.  [] 回調\n' + '            1.  [] 價格調整\n' + '            2.  [] 時間調整\n' + '    2.  [] 橫行/有趨勢的橫行(通道或擴散型) 操作要點\n' + '        1.  [] 頂沽\n' + '        2.  [] 底揸\n' + '        3.  [] 突破回測\n' + '    3. 動能提示\n' + '        1.  [] 原生動能\n' + '        2.  [] 回調深度\n' + '        3.  [] 回調速度\n' + '        4.  [] 動能抵消\n' + '        5.  [] 強弱是相對；趨勢看回調、橫行看頂底\n' + '    4. 介入法則\n' + '        1.  [] 123 法則\n' + '        2.  [] 2B 法則\n' + '    5. 市場慣性改變=>中性\n' + '        1.  [] 趨勢線打破\n' + '        2.  [] 結構被打破:前高 / 前底被打破\n' + '        3.  [] 配合動能\n' + '            1.  [] 原生動能\n' + '            2.  [] 回調深度\n' + '            3.  [] 回調速度\n' + '            4.  [] 動能抵消\n'
+    if i_strategy == '5th'
+        _txt := '- [ ] 訊號燭  (逆、停、動(3 只bar); 吞沒(2只bar))\n' + '    - [ ] 兩三支bars\n' + '    - [ ] 需吞沒逆向動能\n' + '    - [ ] 需發生於關鍵位置\n'
+    if i_strategy == '6th'
+        _txt := '- [ ] 1a. 突破回測 (break and re-test)\n' + '    - [ ] 順勢支持被突破=>/阻力,出現訊號燭=>買順勢方向\n' + '    - [ ] 橫行突破\n' + '    - [ ] 主趨勢反轉(123法則)\n' + '    - [ ] 黏附支持阻力線，待訊號燭在這位置出現。\n' + '        - [ ] 突破bar\n' + '        - [ ] 回測\n' + '        - [ ] 逆、停、動bar\n' + '        - [ ] 在大圖中確認是升/跌勢後，便可在細時區內尋找機會不斷買升/跌\n' + '- [ ] 1b. 假突破\n' + '    - [ ] 適用於\n' + '        1. 橫行頂底\n' + '        2. 主趨勢反轉(2B)\n' + '    - [ ] 操作要點:\n' + '        1. 夠急速\n' + '        2. 模糊便省略、等待假突破再回測\n' + '- [ ]  2. 雙頂/底\n' + '    - [ ] 適用於\n' + '        1. 順勢回調\n' + '        2. 主趨勢反轉\n' + '        3. 橫行頂底\n' + '    - [ ] 操作要點\n' + '        1. 留意趨勢型(買回調)OR橫行型(買頂底)\n' + '        2. 第一頂/底動能強會較好\n' + '        3. 順勢時能配合618較好\n' + '- [ ] 3. 旗型突破\n' + '    - [ ] 適用於\n' + '        1. 順勢延續\n' + '    - [ ] 操作要點\n' + '        1. 必須用於趨勢\n' + '        2. 發力波段具力量較好\n' + '        3. 趨勢尾段不要使用旗型(交易者要12、45)\n' + '    - [ ] 用旗型突破在橫行,好容易被fake\n' + '- [ ] 4.楔型\n' + '    1. 適用於\n' + '        1. 順勢回調完成\n' + '        2. 主趨勢反轉\n' + '        3. 橫行頂底\n' + '    2. 操作要點\n' + '        1. 回調深\n' + '        2. 核心概念:事不過三;一鼓作氣、再而衰、三而竭\n' + '        3. 留意第二段波段的回調，是否超於第一段波段的高/低點(反映行情力量變弱)\n' + '        4. 背後概念，因12345/ABCDE都是5段;所以12345是主趨勢反轉，ABCDE是順勢\n'
+    if i_strategy == '7th'
+        _txt := '維度2:-\n' + '1. 動能\n' + '2. 原生段+ 結構破壞\n' + '3. 突破位居(有條件作禁區互換)\n' + '4. 順勢禁區位置\n' + '5. $$$\n' + '6. 黃金比率\n'
+    if i_strategy == '8th'
+        _txt := '1、判斷是交易還是賭博取決於你參與活動的行為方式，而並不是項目本身。\n' +'2、交易是自己制定優勢規則、實現長期正收益。賭博是被動接受劣勢規則，將會導致長期負收益；\n' +'3、賭博是對行情漲跌的押注，交易是等待並把握行情不可避免的漲跌；\n' + '4、大數據得出的優勢模型，可以將不確定性變為連續性強的大概率事件。\n'
+    if i_strategy == '9th'
+        _txt := '恆指時間提示\n' + '- 9:15 - 9:30 - 期貨單機時段，這段時間內的高/低位極具參考性\n' + '- 9:30 - 正股棍，由9:30發動的動能極具参考性，可由數支bar組成一波=>判斷順勢升/跌，或假升/跌\n' + '- 9:15 - 10:30 = 波動段 : 大概決定當日走勢 (don"t miss this period)\n' + '- 11:00 - 12:00 = 午市前 : 調整段\n' + '- 13:00 - 14:30 = 午市後 : 調整段，除非大動能介入(通常首半小時便會出現)\n' + '- 14:30 - 16:30 = 上證收，歐洲開 : 按當日走勢作跟進(16:00正股收) (另一段don"t miss this period)\n' + '- 盡量推盤(保本)，不要留過4:00，因收盤後隨時逆轉\n' + '- 期結前2天，走勢會較特殊(一係大波動，一係完全唔郁)\n'
+    if i_strategy == '10th'
+        _txt := 'How To Succeed In Your Trading\n' + ' - Focus on one single trading strategy\n' + ' - Less trading, more education\n' + ' - Approach the market from a neutral position\n' + ' - Write your goals\n' + ' - Relax\n' + ' - Know how to handle your trades\n' + ' - Risk management\n' + ' - Keep track of your performance\n'
+    if i_strategy == '11th'
+        _txt := '大事化小 = 拆細黎做\n' + '最細 : ONE GOOD TRADE\n' + '每日 3個 trade (恆指、歐盤FX GOLD 、 美盤  美指 FX GOLD)\n' + '每槍 1-3% risk\n' + '一和一贏一輸 = 2%\n' + 'R : R = 1 : 2 (極保守)\n' + '每日 +5%\n' + '每星期 +5% x 5 = +25%\n' + '每月 +25% x 4 = +100%\n'
+    if i_strategy == '12th'
+// https://www.tradingview.com/chart/BTCUSD/TRrwICB7-Traders-vs-Gamblers-Know-the-main-differences/?utm_source=Weekly&utm_medium=email&utm_campaign=TradingView+Weekly+145+%28EN%29
+        _txt := 'Trader\n' + '1) Focuses on long-term success, profitability, and consistency \n' + '2) Has a valid trading plan and a backtested strategy that he uses all the time and optimises along the way\n' + '3) Strictly obeys risk manangement principles and does not over-leverage his account\n' + '4) Trades only when there are high-probability setups avaialble and his entry criteria have been met\n' + '5) Accepts his losses and dose not get emotional\n' + '6) Treats trading like a business\n' + 'Gambler\n' + '1) Wants to make quick money.\n' + '2) Does not have a strategy and trades based on word of mouth, some tweets, and coin flips\n' + '3) Uses extremely high leverage and risk half of his account on a single trade\n' + '4) Opens random positions, overtrades, and makes irrational decisions\n' + '5) Gets his mood ruined and angry whenever he endures a loss\n' + '6) Thinks that trading is a casino\n' 
+    if i_strategy == '13th'
+        _txt := '一大目標:\n' + '交易長期持續獲利(信任、信心、客觀心態)\n' + '\n' + '五大基本事實:\n' + '1. 任何事情都可能發生\n' + '2. 要賺錢不必知道下一步會有什麼變化\n' + '3. 定義優勢的任何一組變數產生的盈虧，都是隨機分佈的\n' + '4. 優勢只不過是顯示一種事情發生的機率高於另一種事情\n' + '5. 市場中的每一刻都具有獨一無二的性質\n' + '\n' + '長期獲利的一大原則:\n' + '1. 我客觀地看出自己的優勢\n' + '2. 我事先界定每一筆交易的風險\n' + '3. 我完全接受風險，我願意放棄交易\n' + '4. 我根據自己的優勢行動，毫無保留或猶豫\n' + '5. 市場讓我賺錢時，我會酬謝自己\n' + '6. 我不斷檢視自己犯錯的可能性\n' + '7. 我了解這些長期成功原則絕對必要，因此從來沒有違反過\n'
+
+    var table watermark = table.new(i_tableYpos + '_' + i_tableXpos, 1, 1)
+    table.cell(watermark, 0, 0, _txt, i_width, i_height, i_c_text, text_valign=i_textVAlign, text_halign=i_textHAlign, text_size=i_textSize, bgcolor=i_c_bg)
+
+
+f_switch_text()

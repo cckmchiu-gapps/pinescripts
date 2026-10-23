@@ -1,0 +1,768 @@
+//@version=6
+
+// ═══════════════════════════════════════════════════════════════════════════
+indicator("四邊圖 · 四邊獨立拖曳 · 斜線樣式 V10.12", "四邊圖v10", overlay = true, max_bars_back = 1000, max_lines_count = 500, max_labels_count = 500)
+
+// ═══════════════════════ ① 相連格數（2–5）═══════════════════════
+g1 = "① 相連格數（總數自動封頂 5）"
+
+cols = input.int(3, "水平相連格數", minval = 1, maxval = 5, group = g1, tooltip = "向右相連幾格。\n3 = 三格並排相連（預設）。")
+rows = input.int(1, "垂直相連格數", minval = 1, maxval = 5, group = g1, tooltip = "向上相連幾排。\n水平 × 垂直的總格數會自動封頂 5 格。")
+
+// ═══════════════════════ ② ★ 水平對位（v9.9 新增）═══════════════════════
+g12 = "② ★ 水平對位（修正分中線、交叉點、邊線對齊）"
+
+xMode = input.string("★ 手柄優先（邊線貼實手柄 · 推薦）", "★ 水平分割引擎", options = ["★ 手柄優先（邊線貼實手柄 · 推薦）", "分割優先（吸附 4 的倍數）", "棒索引（v9.12 · 舊）"], group = g12, tooltip = "★★ V10.3：預設改為「手柄優先」—— 邊線用【精確時間戳】，直接貼實手柄圓點。\n   （舊「邊線優先」會 round 到整數棒 → 邊線同圓點最多差半根 K 棒。）\n\n■ 根因（一句）\nTradingView「時間 → 像素」映射【唔係線性】——\n週末 / 假期會以空白槽位呈現，所以「時間算術」算出嘅中點唔會落喺像素中點。\n→ X 一律改喺【K 棒索引空間】計算（每根棒像素寬度一致 → 棒索引算術 = 像素算術）。\n\n■ 三個模式\n① ★ 手柄優先（邊線貼實手柄 · 推薦）← V10.3 預設\n   邊線用【精確時間戳】（= 手柄圓點嘅時間）→ 同圓點【完全重疊】（0 偏移）\n   內部分割喺【K 棒索引空間】均勻 → 像素亦均勻（四段極差 ≈ 0）\n   用時間座標 → 冇 500 根限制，唔需要降級\n② 分割優先（吸附 4 的倍數）\n   四段 0 誤差，但右邊可能偏離錨點 ≤ 2 根棒\n   （想要「分割絕對均勻」+ 棒索引座標時用）\n③ 棒索引（v9.12 · 舊）\n   round 到整數棒 → 邊線可能偏離手柄圓點 ≤ 0.5 棒\n   （舊「邊線優先」；除非有特別原因，唔建議用）\n\n■ 超出可繪範圍時\n模式 ①（手柄優先）用時間座標 → 冇限制，唔需要降級。\n模式 ② / ③ 用棒索引，只可畫到 [bar_index − 9999, bar_index + 500]；\n超出 → 自動降級去時間座標（★ 唔平移 —— 平移會令邊線偏離錨點）。\n\n■ 註\n想睇返 v9.12 舊樣就揀模式 ③。")
+
+// ═══════════════════════ ③ 右邊：跟唔跟結算日 ═══════════════════════
+// ★ V10.4：按用戶要求，把「★ 右邊跟結算日」由原本嘅位置（要拉好遠先搵到）
+//   搬到【相連格數之後】。
+// ★ V10.11：用戶再要求把「★ 水平分割引擎」搬到本群組【上邊】→
+//   本群組由 ② 順延為 ③，而「水平對位」由 ⑧ 提前為 ②。
+g5 = "③ 右邊結算日（跟 / 唔跟）"
+
+rightFollowSettle = input.bool(false, "★ 右邊跟結算日", group = g5, tooltip = "★★ 呢個就係「右邊跟唔跟結算日」嘅開關。\n\n【勾選 ✓】右邊自動吸附美國季月結算日\n   3 / 6 / 9 / 12 月嘅第三個星期五。\n   → 手柄 4（右邊）會暫停，唔跟滑鼠。\n   用下面「對齊邊一季」揀第幾季。\n\n【取消 ☐】右邊完全跟手柄 4（預設）\n   → 可以喺圖上自由左右拖到唔同日子。\n\n★ 左邊由手柄 3 獨立控制，兩者互不影響。\n★ 預設 = 唔跟（自由拖）；想跟就勾一下。")
+
+settleQ = input.string("第 1 季（本季）", "對齊邊一季", options = ["第 1 季（本季）", "第 2 季", "第 3 季", "第 4 季", "第 5 季", "第 6 季", "第 7 季", "第 8 季"], group = g5, tooltip = "★ 只在「★ 右邊跟結算日」勾選時生效。\n\n★ 對齊點 = 美國【季月結算日】3 / 6 / 9 / 12 月嘅第三個星期五。\n· 第 1 季 = 圖表之後遇到嘅第一個季月（已過 → 自動順延）\n· 第 8 季 = 之後第 8 個季月（約 2 年後）")
+settleLabel = input.bool(true, "顯示結算日標籤", group = g5, tooltip = "在結算日線上面寫低日期同所屬季度。")
+
+g5b = "③·進階（美國指數標準，一般唔需要改）"
+settleSnap = input.bool(true, "吸附到該日的 K 棒", group = g5b, tooltip = "★ 建議保持開啟。\ntimestamp 算出嚟係當日 00:00，而日線 K 棒時間通常係開盤\n→ 唔吸附嘅話，條線會偏左少少。")
+settleDow = input.string("星期五", "結算星期幾", options = ["星期一", "星期二", "星期三", "星期四", "星期五"], group = g5b)
+settleOcc = input.string("第 3 個", "第幾個", options = ["第 1 個", "第 2 個", "第 3 個", "第 4 個", "最後一個"], group = g5b)
+
+// ═══════════════════════ ★ 四個拖曳手柄 ═══════════════════════
+gH1 = "★ 手柄 1 · 頂邊（上下拖）"
+gH2 = "★ 手柄 2 · 底邊（上下拖）"
+gH3 = "★ 手柄 3 · 左邊（左右拖）"
+gH4 = "★ 手柄 4 · 右邊（左右拖）"
+
+hTop = input.price(0.0, "★ 頂邊價格 · 上下拖我", group = gH1, confirm = true, tooltip = "★★ V10.9：本欄預設仍然係 0 —— Pine 規定 input.price 嘅 defval 必須係【編譯期常數】，\n   唔可以用 ta.sma() 呢類均價（硬寫會出紅字），所以呢欄【做唔到】自動 = 均價 +20%。\n   ★ 但方框已經自動擺喺 均價 +20%（由「★ 價格來源」話事）。\n\n★ 想把【圓點】放喺起步位（三招任揀）：\n   ① 右鍵指標 →「重設點 / Reset points」→ 喺圖上起步位點一下（最直接）\n   ② 開「★ 用手柄接手（拖曳）」→ 喺呢欄打狀態欄顯示嘅建議值\n   ③ 唔想搞圓點 → 用「★ 整體上下移（% 均價）」滑桿（永遠有效）\n\n★ 在圖上【上下拖動】此手柄 → 方框【頂邊】就跟住上下移動。\n（底邊不會動，所以方框高度會跟住變）\n\n★ 預設 0 通常喺畫面外，令佢出現嘅方法同「手柄 2 · 底邊」一樣。\n\n★ 未設定（=0）時，頂邊會自動 = 底邊 + 格高 × 排數，方框唔會消失。\n\n★ V10.8：「★ 價格來源」揀咗「★ 均價做起步」時 ——\n   · 預設手柄【唔參與】→ 方框由「均價 +X% ＋ 整體上下移」話事\n   · 想用手柄拖 → 要開「★ 用手柄接手（拖曳 · 唔理均價起步）」開關")
+
+hBot = input.price(0.0, "★ 底邊價格 · 上下拖我", group = gH2, confirm = true, tooltip = "★★ V10.9：本欄預設仍然係 0 —— Pine 規定 input.price 嘅 defval 必須係【編譯期常數】，\n   唔可以用 ta.sma() 呢類均價（硬寫會出紅字），所以呢欄【做唔到】自動 = 均價 −20%。\n   ★ 但方框已經自動擺喺 均價 −20%（由「★ 價格來源」話事）。\n\n★ 想把【圓點】放喺起步位（三招任揀）：\n   ① 右鍵指標 →「重設點 / Reset points」→ 喺圖上起步位點一下（最直接）\n   ② 開「★ 用手柄接手（拖曳）」→ 喺呢欄打狀態欄顯示嘅建議值\n   ③ 唔想搞圓點 → 用「★ 整體上下移（% 均價）」滑桿（永遠有效）\n\n★ 在圖上【上下拖動】此手柄 → 方框【底邊】就跟住上下移動。\n（頂邊不會動，所以方框高度會跟住變）\n\n★ 預設 0 通常喺畫面外，令佢出現嘅方法：\n   1) 首次加入指標時 TradingView 彈窗叫你點圖表 → 點一下\n   2) 右鍵指標 →「重設點 / Reset points」→ 點圖表\n   3) 直接喺呢欄輸入一個接近現價嘅數字\n\n★ 未設定（=0）時，底邊會自動用「貼近現價」，方框唔會消失。\n\n★ V10.8：「★ 價格來源」揀咗「★ 均價做起步」時 ——\n   · 預設手柄【唔參與】→ 方框由「均價 −X% ＋ 整體上下移」話事\n   · 想用手柄拖 → 要開「★ 用手柄接手（拖曳 · 唔理均價起步）」開關")
+
+hLeft = input.time(timestamp("2026-09-24T00:00:00"), "★ 左邊日期 · 左右拖我", group = gH3, confirm = true, tooltip = "★ 在圖上【左右拖動】此手柄 → 方框【左邊線】就跟住左右移動。\n（右邊不會動，所以方框寬度會跟住變）\n\n★★★ 手柄唔見咗 / 拖唔到？先睇呢度（V10.1）\n呢個手柄嘅【可拖曳標記】係由 TradingView 按日期擺位。\n如果嗰個日期【唔喺你圖表嘅可見範圍內】→ 標記會完全消失、亦拖唔到。\n★ 呢個唔係壞咗，係 TradingView 嘅固有行為。\n\n■ 三個解決方法（任揀一個）\n   ① 向左滾動圖表，令嗰個日期入返可見範圍\n   ② 右鍵指標 →「重設點 / Reset points」→ 喺圖上點一下\n   ③ 直接喺呢欄打一個【畫面內】嘅日期\n\n■ 唔喺畫面範圍內會點？\n   程式當你「未設定」，方框左邊自動由右邊推算（方框唔會消失）。\n   狀態標籤會寫「⚠ 日期 … 喺畫面外」，手柄標籤亦會加警示。\n\n★ 預設日期 2026-09-24。")
+
+hRight = input.time(timestamp("2026-10-07T00:00:00"), "★ 右邊日期 · 左右拖我", group = gH4, confirm = true, tooltip = "★ 在圖上【左右拖動】此手柄 → 方框【右邊線】就跟住左右移動。\n（左邊不會動，所以方框寬度會跟住變）\n\n★★★ 手柄唔見咗 / 拖唔到？先睇呢度（V10.1）\n呢個手柄嘅【可拖曳標記】係由 TradingView 按日期擺位。\n如果嗰個日期【唔喺你圖表嘅可見範圍內】→ 標記會完全消失、亦拖唔到。\n★ 呢個唔係壞咗，係 TradingView 嘅固有行為。\n\n■ 三個解決方法（任揀一個）\n   ① 向右滾動圖表，令嗰個日期入返可見範圍\n   ② 右鍵指標 →「重設點 / Reset points」→ 喺圖上點一下\n   ③ 直接喺呢欄打一個【畫面內】嘅日期\n\n■ 注意：勾咗 ③「★ 右邊跟結算日」→ 右邊改由結算日話事，呢個手柄會暫停（屬設計）。\n\n★ 預設日期 2026-10-07。")
+
+// ═══════════════════════ ★ 價格來源（底邊＋頂邊 · 統一選擇）═══════════════════════
+// ★ V10.7：按用戶要求，底邊／頂邊【唔再各自一個下拉】→ 合併成【一個】統一選擇。
+//   兩邊一定同步用同一種來源，唔會再出現「底邊均價、頂邊手柄」嘅混亂。
+gSrc = "★ 價格來源（底邊＋頂邊 · 統一選擇）"
+
+// ★ 呢個常數只作【比對用】。下拉嘅 options / defval 一定要寫【字面值】
+//   （Pine 規定 options 必須係編譯期字串常數；defval 必須逐字出現喺 options 內）。
+SRC_HANDLE = "★ 手柄數字（可拖曳）"
+
+pxSrc = input.string("★ 均價做起步（底 -%、頂 +%）", "★ 價格來源", options = ["★ 手柄數字（可拖曳）", "★ 均價做起步（底 -%、頂 +%）"], group = gSrc, tooltip = "★★ V10.9：預設已經係【★ 均價做起步】—— 一加指標方框即擺喺 均價 ∓20%，唔使揀。\n★★ 呢個下拉【一次過管底邊同頂邊】（V10.7 統一設定）。\n\n【★ 手柄數字（可拖曳）】\n   完全照舊：方框邊 = 手柄值，拖到邊就貼邊（行為同 V10.4 100% 一樣）。\n\n【★ 均價做起步（底 -%、頂 +%）】← V10.9 預設\n   底邊 = 過去 N 天均價 − X%（預設 10 天 · 20% → 即 −20%）\n   頂邊 = 過去 N 天均價 + X%（預設 10 天 · 20% → 即 +20%）\n   ★ 呢個就係「底邊／頂邊嘅預設值 = 價格來源 ∓20 個百分點」。\n   ★ 方框自動跳去均價位做起步。\n   天數 / 百分比 / 上下移 喺下面「★ 均價來源設定」改（預設 10 天 · ±20%）。\n   ★ 呢個模式【均價優先】—— 手柄唔參與\n     （除非你開「★ 用手柄接手」開關）。\n\n★ 調上下位置三條路（任揀一條）：\n   ①「★ 整體上下移（% 均價）」滑桿 ← 最簡單，唔使拖圓點，永遠有效\n   ②「± 百分比（%）」← 改方框高度\n   ③「★ 用手柄接手」開關 → 拖圖上圓點（要先確保圓點喺畫面）\n\n★ 想返均價位：勾一下「★ 重設返均價起步（暫時唔理手柄）」。\n\n★ 注意（TradingView 固有行為）：\n   方框跳得到去均價位，但【拖曳圓點】改唔到（input.price 嘅 defval 必須係編譯期常數，Pine 冇得改寫 input 值）。\n   若見唔到圓點 → 狀態標籤會寫「★ 想拖：喺設定打 <建議值>」\n   → 照打一次，圓點就出現喺同一位置（方框唔會郁）→ 之後自由拖。")
+
+// ═══════════════════════ ★ 均價來源設定 ═══════════════════════
+gMA = "★ 均價來源設定（10 天 · ±20%）"
+
+maDays = input.int(10, "均價天數（日）", minval = 1, maxval = 500, step = 1, group = gMA, tooltip = "★ 只在「★ 價格來源」揀咗「★ 均價做起步」時生效。\n\n用過去【幾多根 K 棒】嘅收市價平均。\n· 日線圖：10 = 過去 10 個交易日（約 2 星期）\n· 週線圖：10 = 過去 10 個星期\n\n★ 預設 10 天。")
+
+maPct = input.float(20.0, "± 百分比（%）", minval = 0.0, maxval = 100.0, step = 1.0, group = gMA, tooltip = "★ 只在「★ 價格來源」揀咗「★ 均價做起步」時生效。\n\n底邊 = 均價 ×（1 − 呢個%）\n頂邊 = 均價 ×（1 + 呢個%）\n\n例：均價 100、填 20 → 底邊 80、頂邊 120。\n\n★ 預設 20%。")
+
+maForce = input.bool(false, "★ 重設返均價起步（暫時唔理手柄）", group = gMA, tooltip = "★ 只在「★ 價格來源」揀咗「★ 均價做起步」時生效。\n\n【勾選 ✓】暫時唔理手柄值 → 方框即刻搬返均價起步位。\n           （手柄值【唔會被改】，取消勾選即 100% 還原）\n【取消 ☐】手柄一有值就接手（因為「★ 用手柄接手」預設已開）。\n\n■ 幾時用？\n拖到手柄離均價位好遠，想一按返去起步位重新嚟過。")
+
+// ★ V10.8：整體上下移 —— 圓點摸唔到時嘅控制方法（永遠有效）
+maShiftPct = input.float(0.0, "★ 整體上下移（% 均價）", minval = -200.0, maxval = 200.0, step = 1.0, group = gMA, tooltip = "★★ V10.8 新增 —— 唔使拖圓點都可以移方框。\n★ 只在「★ 價格來源」揀咗「★ 均價做起步」時生效。\n\n0   = 均價起步位（預設）\n+10 = 整個方框【上移】10% 均價\n-10 = 整個方框【下移】10% 均價\n\n例：均價 100 → +10 = 方框整體上移 10 點。\n\n■ 為何要加？\ninput.price() 嘅可拖曳圓點由 TradingView 按【數值】擺位。\n手柄值 = 0 或屬舊股票 → 圓點喺畫面外 → 摸唔到、拖唔到（Pine 改唔到）。\n呢條滑桿就係「摸唔到圓點」時嘅替代控制。\n\n■ 高度想改？\n用上面「± 百分比（%）」—— 同時拉開上下兩邊。\n\n★ 手柄一接手（開咗下面嘅「★ 用手柄接手」）→ 呢條滑桿就唔生效（手柄話事）。")
+
+// ★ V10.8：手柄接手開關 —— 明確、可預測，唔會被上隻股票嘅殘留值劫持
+maUseHandle = input.bool(true, "★ 用手柄接手（拖曳 · 唔理均價起步）", group = gMA, tooltip = "★★ V10.8 新增。★★ V10.11：預設改為【開 ✓】（用戶要求）。\n★ 只在「★ 價格來源」揀咗「★ 均價做起步」時生效。\n\n【關 ☐】\n   方框永遠由「均價 ±% ＋ 上下移」話事。\n   手柄完全唔參與 → 【絕對唔會被上隻股票嘅殘留值劫持】。\n\n【開 ✓】← V10.11 預設\n   手柄話事：一拖（或打數值）方框就跟你嘅手柄走。\n   ★ 拖幾遠都得（均價模式冇 foreign 攔截）。\n   ⚠ 但手柄值若果係上隻股票殘留 → 方框會即刻跳去嗰個價位。\n     所以開之前，先確認圓點喺你眼前。\n\n■ 為何要「開關」而唔係「拖到自動接手」？\nPine 冇任何方法分辨「你啱啱拖過」同「殘留值」——\n每次改 input，TradingView 都由頭重算，所有 var 記憶清空。\n所以自動接手天生做唔到 100% 可靠，用明確開關最可預測。\n\n■ 開咗但圓點唔見？\n狀態標籤會寫低建議值 → 打入「★ 底邊價格 / ★ 頂邊價格」→ 圓點就出現。")
+
+// ═══════════════════════ ★ 切換標的自動適應（v9.4 新增）═══════════════════════
+gAd = "★ 切換標的自動適應（v9.4 新增）"
+
+autoAdapt = input.bool(true, "★ 自動適應新標的", group = gAd, tooltip = "★★ v9.4 新增。\n★★ V10.2 修正：而家喺【所有模式】都生效（唯一例外：「★ 價格來源 = 均價做起步」模式）。\n   以前只喺「自動適應（現價 %）」模式生效\n   → 切股票時，方框會飛到畫面外（完全唔見）。\n\n■ 解決乜問題？\nTradingView 嘅指標輸入值係跟【Chart Layout】走，唔係跟【Symbol】走。\n所以切換股票時，手柄值（例如恆指 24800）會原封不動帶去第二隻股票\n（例如美股 $50）→ 方框飛到冇雷公咁遠、K 線被壓扁。\n\n■ 開啟後會點？\n手柄值離現價超過「適應門檻 %」→ 判定為「來自另一隻標的」→ 該手柄暫時失效，\n方框改用「現價 ± 自動高度 %」自動擺位（對任何標的都合適）。\n\n■ ★ 最重要：唔會改寫你嘅手柄值\n自動適應只係「暫時唔理」嗰個值。\n切返原本隻股票，手柄值原封不動，方框即刻 100% 還原。\n\n■ 幾時要關？\n如果你想刻意把方框放喺【遠離現價】嘅位置（例如研究一年前嘅低位），\n而嗰個位置離現價超過門檻 → 就會被誤判。咁就取消打勾。")
+
+adaptPct = input.float(50.0, "適應門檻（% · 手柄值離現價超過此值就當係另一隻標的）", minval = 0, maxval = 1000, step = 5, group = gAd, tooltip = "★ V10.2：喺【所有模式】都生效（唯一例外：「★ 價格來源 = 均價做起步」模式）。\n\n手柄值離現價超過呢個百分比 → 判定為「來自另一隻標的」→ 暫時失效。\n\n■ v9.5 改動\n· 預設由 30 放寬到【50】—— 減少誤傷「方框比較寬」嘅正常情況\n· 而且判定改為：兩邊都有設定時，要【兩邊都遠】先觸發\n\n■ 建議值\n   50  → 預設。\n   100 → 寬鬆（只攔截明顯唔合理嘅值，例如 24800 vs $50）\n   0   → 等同關閉自動適應\n\n■ 點揀？\n如果你睇嘅係【同一類標的】（例如幾隻指數），價位相近，50% 好夠。\n如果你會喺同一張圖睇【價位差好遠】嘅標的（恆指 vs 美股），50% 一定攔到。")
+
+adaptShow = input.bool(true, "適應觸發時喺狀態標籤提示", group = gAd, tooltip = "★ 勾選時，狀態標籤會寫明：\n\n★ 已自動適應（切換標的正常現象）\n　手柄2（底邊）原值 24800\n　（你嘅手柄值冇被改，切返原股票即還原）\n\n令你一眼知道「唔係你設定錯，係程式識別到呢個值唔屬於當前標的」。")
+
+// ═══════════════════════ ④ 預設尺寸（手柄未設定時嘅基準）═══════════════════════
+// ★ V10.10 精簡：原本嘅「全部格一起加減（%）」同「每格高度（價格點數）」已移除。
+//   · 手柄 3 / 4 一設定 → 寬度由手柄話事
+//   · 手柄 1 / 2 一設定 → 高度由手柄話事
+//   呢兩欄只係【手柄未設定時嘅起步值】。
+g2 = "④ 預設尺寸（手柄未設定時嘅基準）"
+
+cellBars = input.int(60, "每格寬度（K 棒 / 日子）", minval = 1, maxval = 500, step = 1, group = g2, tooltip = "★ 直接填【每格橫向幾多根 K 棒】。\n\n· 日線圖：1 根 = 1 個交易日\n   填 20  → 一格 = 20 個交易日（約 4 星期）\n   填 60  → 一格 = 60 個交易日（約 3 個月＝一季）\n\n★ 只在「手柄 3 · 左邊」未設定時，先用呢個值推算寬度。\n★ 一旦拖動左邊手柄，實際寬度就由手柄決定。")
+autoHeightPct = input.float(2.0, "★ 自動高度（% · 方框總高 ÷ 現價）", minval = 0.1, maxval = 50, step = 0.1, group = g2, tooltip = "★ 只在「手柄 1（頂邊）/ 手柄 2（底邊）未設定」時生效。\n\n方框【總高】= 現價 × 呢個百分比（唔受格數影響）。\n\n■ 建議值\n   2.0  → 預設（方框高 ≈ 現價 2%）\n   1.0  → 一半（更貼近價位）\n   5.0  → 較大\n\n例：恆指 25000 → 2% = 500 點高\n    美股 $50   → 2% = $1 高\n\n★ 一旦拖動手柄 1（頂邊）或手柄 2（底邊），實際高度就由手柄決定。")
+
+// ═══════════════════════ ⑤ 移動位置（微調）═══════════════════════
+g4 = "⑤ 微調（喺手柄定位之上再加）"
+
+shiftXBar = input.int(0, "水平位移（K 棒）", minval = -2000, maxval = 2000, step = 1, group = g4, tooltip = "★ 整組一齊向左／右移。\n填 10 = 整組向右移 10 根 K 棒。\n★ 保持 0 先可以精確壓喺手柄／結算日上。")
+shiftYPct = input.float(0.0, "垂直位移（% 格高）", minval = -1000, maxval = 1000, step = 10, group = g4, tooltip = "★ 整組一齊向上／下移。\n100 = 移動一個格高的距離。\n★ 保持 0 先可以精確壓喺手柄上。")
+
+// ═══════════════════════ ⑥ 單格獨立位移 ═══════════════════════
+g6 = "⑥ 單格獨立位移（分開移動）"
+
+sepEnable = input.bool(false, "★ 啟用單格獨立位移（主開關）", group = g6, tooltip = "★★ v9.3 新增。預設【關閉】。\n\n【關閉 ☐】下面所有「第 N 格」嘅數值一律當 0。\n→ 就算呢度有殘留數值，都【絕對推唔歪方框】。\n→ 保證方框四條邊一定貼實手柄。\n\n【開啟 ✓】下面嘅數值才會生效。\n→ 想拆散某一格（例如把第 2 格拉出嚟）先勾呢個。\n\n■ 為何要加？\n呢個位移係「按格高比例」計：cellH × 數值 / 100。\n所以數值 100 = 整整移開一個方框高度 → 睇落就似\n「方框飛到好遠、貼唔實手柄」。加主開關就一勞永逸。")
+
+sep1X = input.float(0.0, "第 1 格 · 水平（%）", minval = -500, maxval = 500, step = 10, inline = "格1", group = g6, tooltip = "★ 只郁【第 1 格】，其他格完全不動。\n0 = 跟住主體圖一齊走；100 = 向右偏移一個格寬。\n\n⚠ 要先勾上面「★ 啟用單格獨立位移」先生效。")
+sep1Y = input.float(0.0, "垂直", minval = -500, maxval = 500, step = 10, inline = "格1", group = g6, tooltip = "只郁第 1 格嘅上下位置。")
+sep2X = input.float(0.0, "第 2 格 · 水平（%）", minval = -500, maxval = 500, step = 10, inline = "格2", group = g6, tooltip = "★ 只郁【第 2 格】，其他格完全不動。")
+sep2Y = input.float(0.0, "垂直", minval = -500, maxval = 500, step = 10, inline = "格2", group = g6, tooltip = "只郁第 2 格嘅上下位置。")
+sep3X = input.float(0.0, "第 3 格 · 水平（%）", minval = -500, maxval = 500, step = 10, inline = "格3", group = g6, tooltip = "★ 只郁【第 3 格】，其他格完全不動。")
+sep3Y = input.float(0.0, "垂直", minval = -500, maxval = 500, step = 10, inline = "格3", group = g6, tooltip = "只郁第 3 格嘅上下位置。")
+sep4X = input.float(0.0, "第 4 格 · 水平（%）", minval = -500, maxval = 500, step = 10, inline = "格4", group = g6, tooltip = "★ 只郁【第 4 格】。格數不足 4 格時唔會生效。")
+sep4Y = input.float(0.0, "垂直", minval = -500, maxval = 500, step = 10, inline = "格4", group = g6, tooltip = "只郁第 4 格嘅上下位置。")
+sep5X = input.float(0.0, "第 5 格 · 水平（%）", minval = -500, maxval = 500, step = 10, inline = "格5", group = g6, tooltip = "★ 只郁【第 5 格】。格數不足 5 格時唔會生效。")
+sep5Y = input.float(0.0, "垂直", minval = -500, maxval = 500, step = 10, inline = "格5", group = g6, tooltip = "只郁第 5 格嘅上下位置。")
+
+// ═══════════════════════ ⑦ 顯示 ═══════════════════════
+g7 = "⑦ 顯示"
+
+showHandle = input.bool(false, "顯示四邊手柄指示標籤", group = g7, tooltip = "喺方框四條邊畫彩色小標籤（「▲ 手柄2 → 底邊」「▶ 手柄4 → 右邊」等），\n話你知邊個手柄控制邊條邊。\n\n★ 呢啲標籤只係指示牌，本身拖唔到；\n   真正要拖嘅係圖上嗰四個圓點標記。\n\n★ V10.12：預設改為【唔顯示 ☐】（用戶要求）。")
+showRef = input.bool(false, "顯示原始大小虛線框", group = g7, tooltip = "在第一格左下角畫一個基準大小的虛線框。")
+showInfo = input.bool(false, "顯示狀態標籤", group = g7, tooltip = "顯示四個手柄嘅狀態、垂直模式、方框價格範圍、現價、距現價距離、方框右邊日期。\n\n★ V10.12：預設改為【唔顯示 ☐】（用戶要求）。\n★ 呢個標籤係睇「手柄建議值 / 警示（日期喺畫面外・拖唔到）」嘅唯一位置 → 需要時開返。")
+showSettleLine = input.bool(true, "顯示結算日參考線", group = g7, tooltip = "畫出結算日藍色虛線作參考。\n即使「★ 右邊跟結算日」冇勾選，都照樣畫出嚟方便你對位。")
+
+diagStyle = input.string("經典扇形", "★ 斜線樣式", options = ["經典扇形", "對齊菱形", "對齊斜線", "不畫斜線"], group = g7, tooltip = "★★ v9.8：預設改回【經典扇形】= v9.5 全部斜線（主對角線 2 條 + 斜線 8 條）。\n\n■ 四種樣式\n   ① 經典扇形 ← 預設（v9.5 原樣）\n      主對角線 2 條 + 扇形斜線 8 條 = 共 10 條\n      交叉點 4/17 落喺 1/4、3/4 線上（23.5%）\n\n   ② 對齊菱形\n      四邊中點菱形 4 條 + 主對角線 2 條\n      交叉點：(0.25,0.25) (0.25,0.75) (0.75,0.25) (0.75,0.75)\n      → 4 個啱啱好落喺 1/4、3/4 紅線嘅交叉位（4/5 = 80%）\n\n   ③ 對齊斜線\n      4 條斜率 ±1 嘅線，交叉點 4 個全部落喺 1/4、3/4 線上（100%）\n      注意：呢個樣式【唔含主對角線】\n\n   ④ 不畫斜線\n      只保留外框、中心十字、1/4、3/4 格線\n\n■ 註\nv9.6 曾加 4 條「對齊斜線」，但令交叉點由 25 暴增到 39，圖更亂 → v9.7 已移除。\n想試「對齊」效果就自己切 ② 或 ③。")
+
+// ═══════════════════════ ⑧ 配色與線寬 ═══════════════════════
+g9 = "⑧ 配色與線寬"
+
+cFrame = input.color(#5F5E5A, "框線 / 中心十字 / 斜線", group = g9)
+cQuarter = input.color(#A32D2D, "1/4、3/4 格線", group = g9)
+cDiag = input.color(#5F5E5A, "主對角線", group = g9)
+cRef = input.color(#B4B2A9, "虛線參考框", group = g9)
+cSettle = input.color(#2962FF, "結算日垂直線", group = g9)
+cQLabel = input.color(#0B5CAD, "結算日標籤文字", group = g9)
+cH1 = input.color(#534AB7, "手柄 1 · 頂邊標籤色", group = g9)
+cH2 = input.color(#A32D2D, "手柄 2 · 底邊標籤色", group = g9)
+cH3 = input.color(#1D9E75, "手柄 3 · 左邊標籤色", group = g9)
+cH4 = input.color(#D85A30, "手柄 4 · 右邊標籤色", group = g9)
+wThin = input.int(1, "細線寬度", minval = 1, maxval = 5, group = g9)
+wThick = input.int(2, "粗線寬度", minval = 1, maxval = 5, group = g9)
+
+// ═══════════════════════ 容器與工具函式 ═══════════════════════
+// ★ v9.9：平均 K 棒間距必須喺工具函式之前計好（f_barToTs / f_tsToBar 要用）。
+//   ta.sma 一律喺全域先算好，唔可以擺入函式或三元運算式入面。
+int barMs = nz(time - time[1], 0)
+float avgBarMs = math.max(nz(ta.sma(barMs, 60), float(barMs)), 1.0)
+// ★ V10.0：日曆感知係數 —— 每日曆日有幾多根 K 棒。
+//   未來冇真實 K 棒，只可以靠歷史數據估。
+//   ★ 唔可以用「相鄰兩根棒嘅最小間距」：日線 = 1 日曆日／棒
+//     → 等於當【日曆日 = 交易日】→ 397 日曆日會當成 397 根棒，
+//       但實際只係 ~283 根（要扣週末／假期）→ 未來物件偏右 ~40%。
+//   ★ 亦唔可以硬編 5/7：唔同市場、唔同週期都唔同（港股有半日市、加密貨幣 7×24）。
+//   → 由歷史 400 根棒（約 1.5 年）實際跨越幾多日曆日直接算出。
+//   ★ 為何係 400？（已用 2023–2028 真實美股日曆量化測試，見 驗證_V10.0_水平對位.py）
+//     histN   100    200    252    400    500
+//     最大誤差  9.2    7.6    6.0    4.0    5.5   根棒（horizon 500 根棒）
+//     → 400 根（約 1.5 年）能平均掉假期聚集效應，最穩定。
+int histN = 400
+float histSpanDays = math.max((not na(time[histN]) ? (float(time) - float(time[histN])) : (avgBarMs * histN)) / 86400000.0, 1.0)
+float barsPerDay = histN / histSpanDays
+
+// ── ★ V10.0：水平分割引擎（由 ② ★ 水平對位 衍生）──
+//   useBarIdx = true → xloc.bar_index（整數 K 棒索引）直接落座標，唔經時間
+//   snapQ4    = true → 格寬吸附 4 的倍數 → 0.25/0.5/0.75 必定係整數棒
+bool useBarIdx = xMode != "★ 手柄優先（邊線貼實手柄 · 推薦）"
+bool snapQ4 = xMode == "分割優先（吸附 4 的倍數）"
+
+var array<line> gLines = array.new<line>()
+var array<label> gLabels = array.new<label>()
+
+// ── ★ v9.9 座標轉換（修正「分中線唔喺中間、交叉線分離」）──
+//   根因：TradingView「時間 → 像素」映射唔係線性（假期 = 空白槽位）。
+//   解法：X 一律喺【K 棒索引空間】計，畫之前內插返做時間戳。
+
+// ── ★ v9.10 修正：以下兩個函式原本【插值方向寫反咗】──
+//   舊版 f_tsToBar 寫 `- fr`、f_barToTs 寫 `time[kf - 1]` 兼 `+ fr * d`
+//   → 由「向正確嗰根 K 棒內插」變成「向隔籬嗰根內插」
+//   → 誤差喺整數棒位置係 0、棒中間最大 2 根棒 →【分格間距忽大忽小】
+//   呢個就係「0.25 / 0.5 / 0.75 / 1 比例唔一致」嘅真正原因。
+
+// 時間戳 → K 棒索引（小數；可為未來 → 用平均棒距外推）
+//   ★ 註：Pine 冇 break/continue，所以用 `na(r)` 守衛，搵到之後其餘圈數空轉。
+//     呢個函式只喺 barstate.islast 執行，而且每次只呼叫幾次，唔影響效能。
+f_tsToBar(float ts) =>
+    float r = na
+    if ts >= float(time)
+        // ★ V10.0：未來用【日曆感知】外推（唔再當「日曆日 = 交易日」）。
+        r := float(bar_index) + (ts - float(time)) / 86400000.0 * barsPerDay
+    else
+        for i = 1 to 800
+            if na(r) and not na(time[i]) and float(time[i]) <= ts
+                // time[i] 係「較早（左）」，time[i-1] 係「較遲（右）」
+                float tA = float(time[i])
+                float tB = not na(time[i - 1]) ? float(time[i - 1]) : tA + avgBarMs
+                float d = tB - tA
+                float fr = d > 0 ? (ts - tA) / d : 0.0
+                // 由距離 i 嗰根向右移 fr 根 → 棒索引【加】
+                r := float(bar_index - i) + fr
+    na(r) ? float(bar_index) : r
+
+// K 棒索引（小數）→ 時間戳：用相鄰兩根 K 棒嘅實際時間線性內插
+//   ★ 數學保證：TradingView 嘅「時間 → 像素」喺【相鄰兩根 K 棒之間】一定係線性
+//     （假期空白槽只係令該段斜率高啲，仍然係一條直線段）
+//     → 所以線性內插係【精確】嘅，唔需要任何吸附 fallback。
+f_barToTs(float b) =>
+    float k = float(bar_index) - b          // 距離當前棒幾多根（>0 過去、<0 未來）
+    float r = na
+    if k <= 0.0
+        // ★ V10.0：同 f_tsToBar 用【同一個】日曆感知係數
+        //   → round-trip 依然精確（兩個方向嘅誤差互相抵消）。
+        r := float(time) + (float(b) - float(bar_index)) / barsPerDay * 86400000.0
+    else
+        int kf = int(math.floor(k))
+        float fr = k - kf                    // [0, 1)
+        if kf >= 799
+            float tRef = not na(time[799]) ? float(time[799]) : float(time)
+            r := tRef - (k - 799.0) * avgBarMs
+        else
+            // b 位於「距離 kf」同「距離 kf+1」兩根 K 棒之間
+            float tA = not na(time[kf]) ? float(time[kf]) : float(time)
+            float tB = not na(time[kf + 1]) ? float(time[kf + 1]) : tA - avgBarMs
+            float d = math.max(tA - tB, 0.0)
+            r := tA - fr * d
+    na(r) ? float(time) : r
+
+// ── ★ V10.0：x 解析器（輸入一律係【K 棒索引】）──
+//   ① 棒索引模式 → 直接四捨五入成整數 K 棒索引（零轉換）
+//      再加一層硬夾限 [bar_index − 9999, bar_index + 500]，
+//      確保永遠唔會踩到 Pine 嘅 runtime error。
+//   ② 時間模式   → 轉時間戳（v9.9 舊行為；冇 500 根限制）
+//   xb = true 用棒索引、false 用時間。
+f_xInt(float b, bool xb) =>
+    xb ? int(math.min(math.max(math.round(b), float(bar_index) - 9999.0), float(bar_index) + 500.0)) : int(math.round(f_barToTs(b)))
+
+// 畫一條線（x 一律傳【K 棒索引】；xb = true 用 xloc.bar_index）
+f_ln(float b1, float y1, float b2, float y2, color c, int w, bool xb) =>
+    array.push(gLines, line.new(f_xInt(b1, xb), y1, f_xInt(b2, xb), y2, xloc = xb ? xloc.bar_index : xloc.bar_time, color = c, width = w))
+
+// ★ V10.0：畫一條線（K 棒索引 + 可選線型）—— 結算日線改用呢個
+f_lnS(float b1, float y1, float b2, float y2, color c, int w, string st) =>
+    array.push(gLines, line.new(f_xInt(b1, true), y1, f_xInt(b2, true), y2, xloc = xloc.bar_index, color = c, width = w, style = st))
+
+// 畫一條線（直接傳【時間戳】· 結算日參考線等用）
+f_lnT(float t1, float y1, float t2, float y2, color c, int w, string st) =>
+    array.push(gLines, line.new(int(math.round(t1)), y1, int(math.round(t2)), y2, xloc = xloc.bar_time, color = c, width = w, style = st))
+
+// 虛線矩形框（用於原始大小參考）· x 為【K 棒索引】
+f_ref(float xl, float yb, float wbs, float hpr, bool xb) =>
+    float xr = xl + wbs
+    float yt = yb + hpr
+    array.push(gLines, line.new(f_xInt(xl, xb), yb, f_xInt(xr, xb), yb, xloc = xb ? xloc.bar_index : xloc.bar_time, color = cRef, width = 1, style = line.style_dashed))
+    array.push(gLines, line.new(f_xInt(xr, xb), yb, f_xInt(xr, xb), yt, xloc = xb ? xloc.bar_index : xloc.bar_time, color = cRef, width = 1, style = line.style_dashed))
+    array.push(gLines, line.new(f_xInt(xr, xb), yt, f_xInt(xl, xb), yt, xloc = xb ? xloc.bar_index : xloc.bar_time, color = cRef, width = 1, style = line.style_dashed))
+    array.push(gLines, line.new(f_xInt(xl, xb), yt, f_xInt(xl, xb), yb, xloc = xb ? xloc.bar_index : xloc.bar_time, color = cRef, width = 1, style = line.style_dashed))
+
+// 狀態標籤 · x 為【K 棒索引】
+f_cap(float xb, float yb, string txt, bool xm) =>
+    array.push(gLabels, label.new(f_xInt(xb, xm), yb, txt, xloc = xm ? xloc.bar_index : xloc.bar_time, style = label.style_label_up, color = color.new(color.white, 0), textcolor = color.black, size = size.small))
+
+// 結算日標籤 · x 為【時間戳】（時間模式用）
+f_qlab(float xms, float y, string txt) =>
+    array.push(gLabels, label.new(int(math.round(xms)), y, txt, xloc = xloc.bar_time, style = label.style_label_down, color = color.new(color.white, 15), textcolor = cQLabel, size = size.small))
+
+// ★ V10.0：結算日標籤 · x 為【K 棒索引】（棒索引模式用，同方框邊線同一座標系）
+f_qlabB(float xb, float y, string txt) =>
+    array.push(gLabels, label.new(f_xInt(xb, true), y, txt, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(color.white, 15), textcolor = cQLabel, size = size.small))
+
+// ── 手柄指示標籤（彩色，中心對齊點）· x 為【K 棒索引】──
+f_handle(float xb, float y, string txt, color c, bool xm) =>
+    array.push(gLabels, label.new(f_xInt(xb, xm), y, txt, xloc = xm ? xloc.bar_index : xloc.bar_time, style = label.style_label_center, color = color.new(c, 15), textcolor = color.white, size = size.small))
+
+// ── 星期幾文字 → Pine dayofweek 數值（1 = 星期日 … 7 = 星期六）──
+f_dowNum(string s) =>
+    s == "星期一" ? 2 : s == "星期二" ? 3 : s == "星期三" ? 4 : s == "星期四" ? 5 : 6
+
+// ── 第幾個 → 序號（5 = 最後一個）──
+f_occNum(string s) =>
+    s == "第 1 個" ? 1 : s == "第 2 個" ? 2 : s == "第 3 個" ? 3 : s == "第 4 個" ? 4 : 5
+
+// ── 算出「某年某月第 N 個星期 X」的 UNIX 毫秒時間戳 ──
+//   ★ V10.0：一律用【12:00 UTC】做基準。
+//     舊版用 00:00 UTC → 對 UTC−12 ~ UTC+11 以外嘅交易所（美股 16:00 ET 等）
+//     會落到前一個日曆日 → 結算日偏一日。
+//     12:00 UTC 對 UTC−12 ~ UTC+11 都係同一日曆日
+//     （唯一例外：Pacific/Auckland 夏令時 UTC+13，已在說明文件註明）。
+//   ★ 亦完全避開 timestamp() 嘅 timezone 參數 → 唔會踩 CE10123 陷阱。
+f_settleTs(int yy, int mm, int dow, int occ) =>
+    int tsFirst = timestamp(yy, mm, 1, 12, 0, 0)
+    int fd = dayofweek(tsFirst)
+    int delta = (dow - fd + 7) % 7
+    int firstDay = 1 + delta
+    int yyN = mm == 12 ? yy + 1 : yy
+    int mmN = mm == 12 ? 1 : mm + 1
+    int dim = dayofmonth(timestamp(yyN, mmN, 1, 12, 0, 0) - 86400000)
+    int dayNum = firstDay + (occ - 1) * 7
+    if dayNum > dim
+        dayNum := firstDay + int(math.floor((dim - firstDay) / 7.0)) * 7
+    timestamp(yy, mm, dayNum, 12, 0, 0)
+
+// ═══════════════════════ 畫單一格：20 條線 ═══════════════════════
+f_box(float xl, float yb, float wms, float hpr, bool xb) =>
+    float xr = xl + wms
+    float yt = yb + hpr
+    float a1x = xl
+    float a1y = yt
+    float a2x = xr
+    float a2y = yt
+    float a3x = xr
+    float a3y = yb
+    float a4x = xl
+    float a4y = yb
+    // 四邊中點
+    float mtx = (a1x + a2x) / 2
+    float mty = (a1y + a2y) / 2
+    float mrx = (a2x + a3x) / 2
+    float mry = (a2y + a3y) / 2
+    float mbx = (a3x + a4x) / 2
+    float mby = (a3y + a4y) / 2
+    float mlx = (a4x + a1x) / 2
+    float mly = (a4y + a1y) / 2
+    // 1/4、3/4 邊上點
+    float q1tx = 0.75 * a1x + 0.25 * a2x
+    float q1ty = 0.75 * a1y + 0.25 * a2y
+    float q3tx = 0.25 * a1x + 0.75 * a2x
+    float q3ty = 0.25 * a1y + 0.75 * a2y
+    float q1bx = 0.75 * a4x + 0.25 * a3x
+    float q1by = 0.75 * a4y + 0.25 * a3y
+    float q3bx = 0.25 * a4x + 0.75 * a3x
+    float q3by = 0.25 * a4y + 0.75 * a3y
+    float q1lx = 0.75 * a1x + 0.25 * a4x
+    float q1ly = 0.75 * a1y + 0.25 * a4y
+    float q3lx = 0.25 * a1x + 0.75 * a4x
+    float q3ly = 0.25 * a1y + 0.75 * a4y
+    float q1rx = 0.75 * a2x + 0.25 * a3x
+    float q1ry = 0.75 * a2y + 0.25 * a3y
+    float q3rx = 0.25 * a2x + 0.75 * a3x
+    float q3ry = 0.25 * a2y + 0.75 * a3y
+
+    // ── 外框 4 條 ──
+    f_ln(a1x, a1y, a2x, a2y, cFrame, wThin, xb)
+    f_ln(a2x, a2y, a3x, a3y, cFrame, wThin, xb)
+    f_ln(a3x, a3y, a4x, a4y, cFrame, wThin, xb)
+    f_ln(a4x, a4y, a1x, a1y, cFrame, wThin, xb)
+
+    // ── 中心十字 2 條 ──
+    f_ln(mtx, mty, mbx, mby, cFrame, wThin, xb)
+    f_ln(mlx, mly, mrx, mry, cFrame, wThin, xb)
+
+    // ── 1/4、3/4 格線 4 條（粗）──
+    f_ln(q1tx, q1ty, q1bx, q1by, cQuarter, wThick, xb)
+    f_ln(q3tx, q3ty, q3bx, q3by, cQuarter, wThick, xb)
+    f_ln(q1lx, q1ly, q1rx, q1ry, cQuarter, wThick, xb)
+    f_ln(q3lx, q3ly, q3rx, q3ry, cQuarter, wThick, xb)
+
+    // ── 主對角線 2 條 ──
+    f_ln(a1x, a1y, a3x, a3y, cDiag, wThin, xb)
+    f_ln(a2x, a2y, a4x, a4y, cDiag, wThin, xb)
+
+    // ── 斜線（樣式由 ⑦「★ 斜線樣式」控制 · v9.7 改為【換線型】而唔係【加線】）──
+    if diagStyle == "經典扇形"
+        // 原 8 條：每個角 → 它不接觸的兩條邊之中點
+        f_ln(a1x, a1y, mrx, mry, cFrame, wThin, xb)
+        f_ln(a1x, a1y, mbx, mby, cFrame, wThin, xb)
+        f_ln(a2x, a2y, mlx, mly, cFrame, wThin, xb)
+        f_ln(a2x, a2y, mbx, mby, cFrame, wThin, xb)
+        f_ln(a3x, a3y, mlx, mly, cFrame, wThin, xb)
+        f_ln(a3x, a3y, mtx, mty, cFrame, wThin, xb)
+        f_ln(a4x, a4y, mrx, mry, cFrame, wThin, xb)
+        f_ln(a4x, a4y, mtx, mty, cFrame, wThin, xb)
+    else if diagStyle == "對齊菱形"
+        // 四邊中點菱形 4 條 —— 同主對角線交於 1/4、3/4 紅線嘅交叉位
+        f_ln(mlx, mly, mbx, mby, cFrame, wThin, xb)
+        f_ln(mbx, mby, mrx, mry, cFrame, wThin, xb)
+        f_ln(mrx, mry, mtx, mty, cFrame, wThin, xb)
+        f_ln(mtx, mty, mlx, mly, cFrame, wThin, xb)
+    else if diagStyle == "對齊斜線"
+        // 4 條斜率 ±1，交叉點 100% 落喺 1/4、3/4 線上
+        //   L1 (左邊75%) → (下邊75%)   y = 0.75 − x
+        //   L2 (左邊25%) → (上邊75%)   y = x + 0.25
+        //   L3 (下邊25%) → (右邊75%)   y = x − 0.25
+        //   L4 (上邊25%) → (右邊25%)   y = 1.25 − x
+        f_ln(xl, yb + hpr * 0.75, xl + wms * 0.75, yb, cFrame, wThin, xb)
+        f_ln(xl, yb + hpr * 0.25, xl + wms * 0.75, yt, cFrame, wThin, xb)
+        f_ln(xl + wms * 0.25, yb, xr, yb + hpr * 0.75, cFrame, wThin, xb)
+        f_ln(xl + wms * 0.25, yt, xr, yb + hpr * 0.25, cFrame, wThin, xb)
+
+// ═══════════════════════ 基準尺寸計算 ═══════════════════════
+// ★ V10.10 精簡：只剩兩個旋鈕（「每格寬度」/「★ 自動高度 %」）。
+//   呢兩個值【只係手柄未設定時嘅起步值】—— 手柄一設定就完全由手柄話事。
+//   ★ v9.9：barMs / avgBarMs 已搬到上面（工具函式之前）—— 呢度唔再重複宣告。
+//   ★ 方框基準寬度用【K 棒根數】為單位（用毫秒會受假期空白影響）。
+float baseBars = cellBars
+float baseH = close * autoHeightPct / 100.0 / rows
+float totalBars = baseBars * cols
+
+// ═══ ★ V10.7：統一價格來源（手柄數字 / 均價做起步）═══
+//   ★ 均價只做【起步位置】，唔係鎖死 —— 手柄隨時接手（拖到邊，方框去邊）。
+//   ★ ta.* 必須喺【全域】先算好（唔可以擺入 if / 三元式）。
+bool useMA = pxSrc != SRC_HANDLE
+float maPrice = nz(ta.sma(close, maDays), close)
+float maBotP = maPrice * (1.0 - maPct / 100.0)
+float maTopP = maPrice * (1.0 + maPct / 100.0)
+// ★ V10.8：整體上下移（% 均價）—— 圓點摸唔到時嘅控制方法
+float maOff = maPrice * maShiftPct / 100.0
+
+// ═══ 季月結算日計算 ── 一季只畫 1 組 ═══
+int qSel = settleQ == "第 1 季（本季）" ? 1 : settleQ == "第 2 季" ? 2 : settleQ == "第 3 季" ? 3 : settleQ == "第 4 季" ? 4 : settleQ == "第 5 季" ? 5 : settleQ == "第 6 季" ? 6 : settleQ == "第 7 季" ? 7 : 8
+int qIdxNow = (year(time) - 2020) * 4 + int(math.floor((month(time) - 1) / 3.0))
+
+// ═══════════════════════ 主繪製 ═══════════════════════
+if barstate.islast
+    // 清掉上一輪
+    for l in gLines
+        line.delete(l)
+    array.clear(gLines)
+    for lb in gLabels
+        label.delete(lb)
+    array.clear(gLabels)
+
+    // ★ V10.10 精簡：⑩ 垂直鎖定狀態機（vLockArmed / prevVLock / lockReleased /
+    //   prevHBot / prevHTop）已全部移除。
+
+    // ★ V10.10 精簡：baseBars == cellBars → 水平位移就係 K 棒根數本身。
+    float offXb = float(shiftXBar)
+    float offY = baseH * shiftYPct / 100.0
+
+    // ═══ 季月結算日 ═══
+    // ★ V10.0：today0 也用【12:00 UTC】，與 f_settleTs() 同基準。
+    int today0 = timestamp(year(time), month(time), dayofmonth(time), 12, 0, 0)
+    int qIdxTarget = qIdxNow + (qSel - 1)
+    int tY0 = 2020 + int(math.floor(qIdxTarget / 4.0))
+    int tM0 = (qIdxTarget % 4) * 3 + 3
+    if qSel == 1 and f_settleTs(tY0, tM0, f_dowNum(settleDow), f_occNum(settleOcc)) < today0
+        qIdxTarget := qIdxTarget + 1
+    int eYY = 2020 + int(math.floor(qIdxTarget / 4.0))
+    int eMM = (qIdxTarget % 4) * 3 + 3
+
+    int drawn = cols * rows > 5 ? 5 : cols * rows
+
+    int sDD = dayofmonth(f_settleTs(eYY, eMM, f_dowNum(settleDow), f_occNum(settleOcc)))
+    int snapTs = f_settleTs(eYY, eMM, f_dowNum(settleDow), f_occNum(settleOcc))
+    if settleSnap
+        // ① 先搵【過去 500 根】之內有冇該日嘅真實 K 棒（最精確）
+        int nMax = bar_index > 499 ? 499 : bar_index
+        bool found = false
+        for i = 0 to nMax
+            if not found
+                if year(time[i]) == eYY and month(time[i]) == eMM and dayofmonth(time[i]) == sDD
+                    snapTs := time[i]
+                    found := true
+        // ★ V10.0：結算日喺【未來】（或超過 500 根之前）→ 上面搵唔到。
+        //   用「該日 + 當前圖表 K 棒嘅 UTC 時分」：
+        //     hour(time, "UTC") = 當前 K 棒喺 UTC 嘅小時
+        //     配合 timestamp(y, m, d, h, m, 0)（UTC）→ 時區一致。
+        //   → 自動適應任何市場（港股 / 美股 / 日股 …），
+        //     而且完全避開 timestamp() 嘅 timezone 參數（CE10123 陷阱）。
+        if not found
+            snapTs := timestamp(eYY, eMM, sDD, hour(time, "UTC"), minute(time, "UTC"), 0)
+
+    // ═══ ③ 右邊：跟結算日（勾選）或 跟手柄 4（預設）═══
+    float visL = float(chart.left_visible_bar_time)
+    float visR = float(chart.right_visible_bar_time)
+
+    // ★★★ V10.4 關鍵修正：手柄「有效」判定改用【固定時間窗】★★★
+    //   ■ 舊版（V10.1~V10.3）用【可視範圍】判定：
+    //       rightOn = (hRight >= visL − visSpan/2) and (hRight <= visR + visSpan/2)
+    //     → 問題：visL / visR 係「你而家見到嘅範圍」。
+    //        你一路向右拖手柄、圖表一路自動滾動 → visL / visR 一路變
+    //        → rightOn 會【忽然由 true 變 false】
+    //        → xAnchor 由 hRight 忽然跳返 snapTs（結算日）→ 方框彈走。
+    //     ★ 呢個就係「超過 2027 年中之後有機會失控」嘅真正原因：
+    //       當 hRight 超出「右邊可見範圍 + 半個可視寬」→ 判定反轉 → 方框跳走。
+    //       （可視範圍愈窄，愈快踩到 → 所以「有時得、有時唔得」＝唔穩定）
+    //
+    //   ■ 新版：改用【最後一根 K 棒】做基準嘅固定時間窗 —— 完全唔受滾動影響。
+    //       past 5 年 ～ future 5 年（足夠覆蓋 8 個季度 ≈ 2 年 + 大量餘裕）
+    //     → 判定穩定 → 自由拉唔會再彈走。
+    float hValidLo = float(time) - 5.0 * 365.25 * 86400000.0
+    float hValidHi = float(time) + 5.0 * 365.25 * 86400000.0
+    bool rightOn = (float(hRight) >= hValidLo) and (float(hRight) <= hValidHi)
+    // ★ V10.4：標記「喺唔喺你眼前」—— 純提示用，唔參與幾何計算。
+    bool hLeftVisible  = (float(hLeft)  >= visL) and (float(hLeft)  <= visR)
+    bool hRightVisible = (float(hRight) >= visL) and (float(hRight) <= visR)
+    // ★ v9.2：勾「★ 右邊跟結算日」→ 用結算日；未勾 → 用手柄 4（手柄未設定就退回結算日）
+    float xAnchor = rightFollowSettle ? float(snapTs) : (rightOn ? float(hRight) : float(snapTs))
+    // ★ v9.9：xAnchor 保留【時間】（標籤 / 畫面判斷用）；幾何一律用【K 棒索引】
+    float xAnchorBar = f_tsToBar(xAnchor)
+    float xRightABar = xAnchorBar + offXb
+    // 結算日參考線亦對齊到同一根 K 棒（避免同方框右邊差半根棒）
+    // ★ V10.3：結算日參考線一律用【真實時間戳】（唔跟 xMode，因為佢係日曆日期）
+    //   原本喺時間模式會 round 到整數棒 → 同方框右邊差 ≤0.5 棒；V10.3 移除 round。
+
+    // ═══ ★ 手柄 3 · 左邊（左右拖）═══
+    // ★ V10.4：同右邊一樣，改用【固定時間窗】判定（原本用可視範圍 → 會因滾動而反轉）
+    bool leftOn = (float(hLeft) >= hValidLo) and (float(hLeft) <= hValidHi)
+    float xAutoLeftBar = xRightABar - totalBars
+    float xLeftBBar = leftOn ? (f_tsToBar(float(hLeft)) + offXb) : xAutoLeftBar
+
+    // ★ v9.2 修正：兩條邊交叉都唔再回退寬度 —— 用 min/max，
+    //   方框永遠由左至右，而兩條邊【依然各自貼實自己嘅手柄】。
+    // ★ V10.0：xLeftBarRaw / xRightBarRaw 就係【左右兩邊嘅原始錨點】，
+    //   下面直接各自 round → 兩邊都精確對齊手柄 / 結算日。
+    float xLeftBarRaw = math.min(xLeftBBar, xRightABar)
+    float xRightBarRaw = math.max(xLeftBBar, xRightABar)
+
+    // ── ★ V10.0：X 軸量化（邊線優先）──
+    //   ① 左邊、右邊【各自】round 到整數棒 → 兩邊都精確對齊手柄 / 結算日
+    //   ② 內部分割點四捨五入 → 四段極差 ≤ 1 根棒（約 6px）
+    //   ③ 想要「四段 0 誤差」→ ② 揀「分割優先（吸附 4 的倍數）」
+    float xLeftBar = useBarIdx ? math.round(xLeftBarRaw) : xLeftBarRaw
+    float xRightBar = useBarIdx ? math.round(xRightBarRaw) : xRightBarRaw
+    if useBarIdx and snapQ4
+        // 分割優先（可選）：以【左邊】為基準，格寬吸附 4 的倍數
+        // → 四段 0 誤差，但右邊可能偏離錨點 ≤ 2 根棒
+        float cw = math.max(math.round((xRightBar - xLeftBar) / cols), 4.0)
+        cw := math.max(4.0 * math.round(cw / 4.0), 4.0)
+        xRightBar := xLeftBar + cw * cols
+    float boxWBars = math.max(xRightBar - xLeftBar, 1.0)
+    float cellWBars = boxWBars / cols
+
+    // ── ★ V10.0：xloc.bar_index 只可畫到 [bar_index − 9999, bar_index + 500] ──
+    //   ★ 唔用「範圍平移」！平移會令【左右邊線偏離手柄 / 結算日】，
+    //     即係親手破壞「右邊對齊結算日」嘅語義。
+    //   改為：只要任一邊超出 → 直接降級去【時間模式】。
+    //     xloc.bar_time 冇 500 根限制，而且用【真實時間戳】→ 邊線一定對齊。
+    //   代價：水平分割會受假期影響。但「邊線對齊」遠比「分割 0 誤差」重要。
+    bool xUseBar = useBarIdx
+    bool xDegraded = false
+    if useBarIdx
+        float xMargin = boxWBars * 0.05          // 對位診斷線會伸出 5%
+        if xLeftBar < float(bar_index) - 9999.0 + xMargin or xRightBar > float(bar_index) + 500.0 - xMargin
+            xUseBar := false                     // ★ 降級：改用 xloc.bar_time
+            xDegraded := true
+
+    // ═══ ★ 手柄 2 · 底邊（上下拖）═══
+    //   ★ v9.2 核心修正：手柄有設定 → 邊 = 手柄值，【零偏移】
+    //     ⑤ 垂直位移（offY）只作用於【自動位置】，而且全程只加一次。
+    //     咁樣就保證「手柄喺邊，方框條邊就喺邊」，唔會偏離滑鼠線。
+    float refH = rows * baseH
+    // ★ V10.10 精簡：冇咗「垂直基準」二選一 → 一律「貼近現價」居中。
+    float yAutoBot = close - refH * 0.5
+    // ★ V10.7：統一價格來源。
+    //   · botSet / topSet = 手柄【原始值】有冇設定（=0 視為未設定）
+    //   · botOn  / topOn  = 「有嘢話事」（均價模式永遠 true）
+    //   ★ 注意：foreign 判定要用 botSet（唔可以用 botOn）——
+    //     均價模式 botOn 永遠 true，用咗就會令「手柄=0」被誤判成「外來值」。
+    bool botSet = hBot != 0.0
+    bool topSet = hTop != 0.0
+    bool botOn = useMA or botSet
+    bool topOn = useMA or topSet
+
+    // ★ V10.10 精簡：【各標的記憶表】已移除 → 方框來源只剩「手柄 / 均價起步」。
+    //   ① 均價模式 → 方框 = 均價 ∓%（除非用戶開咗「★ 用手柄接手」→ 用手柄）
+    //   ② 手柄模式 → 方框 = 手柄值（「自動適應」會先做 foreign 判定）
+    //   ③ 兩者都未設定 → 自動位置（現價 ± 自動高度 %）
+
+    // ═══ ★ v9.4 自動適應（★ V10.2 起：所有模式都生效，除「均價做起步」模式）═══
+    //   TradingView 嘅手柄值係跟 Chart Layout 走、唔跟 Symbol 走。
+    //   所以切換股票時，手柄值（絕對價格）會原封不動帶過去 →
+    //   對新標的嚟講係唔合理嘅數字（例如 24800 對美股 $50）→ 方框飛走。
+    //   ★ 只係「暫時唔理」嗰個值，【唔會改寫】佢 → 切返原股票即還原。
+    //
+    //   ★ v9.5 修正 v9.4 嘅誤觸發 bug：
+    //     v9.4：adapted = botForeign or topForeign
+    //       → 只要【任何一邊】遠，兩邊一齊失效。
+    //       方框一寬（低邊離現價遠）就誤觸發 →【兩條邊都脫開手柄】。
+    //     v9.5：兩邊都有設定 → 要【兩邊都遠】先觸發（切股票正正係咁）；
+    //           只有一邊設定 → 嗰邊遠就觸發。
+    float adaptLim = close * adaptPct / 100.0
+    // ★ V10.2：唔再限制模式 —— 手柄值離現價太遠就自動避開。
+    //   ★ 呢個就係「切換第二隻股票 → 方框完全唔見」嘅修復。
+    // ★ V10.10：記憶表已移除 → adaptOn 唔再需要 `not slotHit`。
+    bool adaptOn = autoAdapt and adaptPct > 0.0 and close > 0.0
+    // ★ V10.7：均價模式【豁免】自動適應。
+    //   若唔豁免：你一拖手柄拖遠少少 → 離現價 > 適應門檻 → 被判定「屬上隻股票」
+    //   → 手柄即刻失效、方框彈返均價位 =「拖唔到」（正正就係用戶唔要嘅嘢）。
+    //   ★ 所以均價模式：唔做 foreign 判定 → 拖幾遠都得。
+    bool botForeign = adaptOn and (not useMA) and botSet and (math.abs(hBot - close) > adaptLim)
+    bool topForeign = adaptOn and (not useMA) and topSet and (math.abs(hTop - close) > adaptLim)
+    bool bothSet = botSet and topSet
+    bool adapted = bothSet ? (botForeign and topForeign) : (botForeign or topForeign)
+
+    // ═══ ★ V10.7/V10.8：有效手柄值 hBotE / hTopE —— 下游（畫框 / 診斷線 / 標籤）一律用呢兩個 ═══
+    //   非均價模式：hBotE = hBot（同 V10.4 逐字一樣，零行為改動）
+    //   均價模式　：① 開咗「★ 用手柄接手」且手柄有值 → 用手柄（絕對值，零偏移）
+    //               ② 否則 → 均價起步位 + 整體上下移（maOff）
+    //   ★ V10.8：接手改由【明確開關】maUseHandle 話事（預設關）。
+    //     舊版 botHandleOK 用 `botSet and (not botForeign)`，而 botSet 只睇「係唔係 0」
+    //     → 手柄只要唔係 0 就即刻接手，包括【上隻股票殘留嘅舊值】
+    //     → 底邊 380（388 殘留）、頂邊 60（均價 +20%）→ 380 > 60 ← 用戶實測問題。
+    bool botHandleOK = botSet and (not maForce) and maUseHandle
+    bool topHandleOK = topSet and (not maForce) and maUseHandle
+    float hBotE = useMA ? (botHandleOK ? hBot : (maBotP + maOff)) : hBot
+    float hTopE = useMA ? (topHandleOK ? hTop : (maTopP + maOff)) : hTop
+    // ★ V10.8：接手值離均價位好遠 → 好可能係上隻股票殘留（純提示，唔阻止）
+    float maBand = math.abs(maTopP - maBotP)
+    float maFarTol = math.max(maBand * 3.0, maPrice * 0.5)
+    bool botFar = useMA and maUseHandle and botSet and (math.abs(hBot - maBotP) > maFarTol)
+    bool topFar = useMA and maUseHandle and topSet and (math.abs(hTop - maTopP) > maFarTol)
+
+    // 有效手柄（未被適應）—— 繪製一律用呢兩個
+    // ★ V10.7：均價模式【強制 true】—— 否則會被 adapted 蓋過，
+    //   方框會跌返「現價自動位置」，均價起步位就永遠見唔到。
+    bool botOnEff = useMA ? true : (botOn and not adapted)
+    bool topOnEff = useMA ? true : (topOn and not adapted)
+
+    // ═══ 組裝：手柄 / 均價起步 > 自動位置 ═══
+    float yBotSet = botOnEff ? hBotE : (yAutoBot + offY)
+    float yTopSet = topOnEff ? hTopE : (yBotSet + refH)
+
+    // ★ V10.10 精簡：⑩ 安全網 同 ⑩ 垂直鎖定 已移除 →
+    //   唔再需要 pullBack / hKeep 兩層「搬走方框」嘅中間變數。
+    //   ★ v9.2 原則保留：兩條邊交叉時唔回退高度 —— 用 min/max，
+    //     方框永遠由低至高，而兩條邊【依然各自貼實自己嘅手柄】。
+    float yBot = math.min(yBotSet, yTopSet)
+    float yTop = math.max(yBotSet, yTopSet)
+    float boxH = math.max(yTop - yBot, 1e-9)
+    float cellH = boxH / rows
+
+    // ── 平鋪：第 (mr, k) 格 = 起點 + k·格寬 + mr·格高 → 零間隙首尾相連 ──
+    for mr = 0 to rows - 1
+        for k = 0 to cols - 1
+            int idx = mr * cols + k
+            if idx < 5
+                // ★ v9.3：⑥ 主開關關閉時，sepOn = 0 → 所有單格位移一律失效
+                float sepOn = sepEnable ? 1.0 : 0.0
+                float cOffX = (sep1X * (idx == 0 ? 1.0 : 0.0) + sep2X * (idx == 1 ? 1.0 : 0.0) + sep3X * (idx == 2 ? 1.0 : 0.0) + sep4X * (idx == 3 ? 1.0 : 0.0) + sep5X * (idx == 4 ? 1.0 : 0.0)) * sepOn
+                float cOffY = (sep1Y * (idx == 0 ? 1.0 : 0.0) + sep2Y * (idx == 1 ? 1.0 : 0.0) + sep3Y * (idx == 2 ? 1.0 : 0.0) + sep4Y * (idx == 3 ? 1.0 : 0.0) + sep5Y * (idx == 4 ? 1.0 : 0.0)) * sepOn
+                float cx = xLeftBar + k * cellWBars + cellWBars * cOffX / 100.0
+                float cy = yBot + mr * cellH + cellH * cOffY / 100.0
+                f_box(cx, cy, cellWBars, cellH, xUseBar)
+
+    // ── 結算日垂直參考線 ──
+    float sTop = yTop + cellH * 0.35
+    float sBot = yBot - cellH * 0.25
+    // ★ V10.0：結算日線改用【同方框邊線完全一樣嘅座標路徑】。
+    //   舊版：結算日線用 xloc.bar_time、方框用 xloc.bar_index → 兩套座標系
+    //   → 未來結算日時兩者會分開（正是「右邊唔貼結算日」）。
+    //   新版：一律用 f_tsToBar(snapTs) 嘅同一個 K 棒索引 + xloc.bar_index
+    //   → 數學上必定重疊。
+    float settleBar = f_tsToBar(float(snapTs))
+    if showSettleLine
+        if xUseBar
+            f_lnS(settleBar, sBot, settleBar, sTop, cSettle, 1, line.style_dashed)
+        else
+            f_lnT(float(snapTs), sBot, float(snapTs), sTop, cSettle, 1, line.style_dashed)
+        if settleLabel
+            string qTxt = str.format_time(snapTs, "yyyy-MM-dd") + "  " + (eMM <= 3 ? "Q1" : eMM <= 6 ? "Q2" : eMM <= 9 ? "Q3" : "Q4")
+            if xUseBar
+                f_qlabB(settleBar, sTop + cellH * 0.02, qTxt)
+            else
+                f_qlab(float(snapTs), sTop + cellH * 0.02, qTxt)
+
+    // ── 原始大小虛線框 ──
+    if showRef
+        f_ref(xLeftBar, yBot, baseBars, baseH, xUseBar)
+
+    // ★ V10.10 精簡：⑪ 對位診斷（螢光位置線 diagMode）已移除。
+    // ═══ ★ 四邊手柄指示標籤 ═══
+    //   注意：呢啲標籤只係「話你知邊條邊由邊個手柄控制」，
+    //   真正要拖嘅係圖上嗰四個【圓點標記】，標籤本身係拖唔到嘅。
+    if showHandle
+        // ★ v9.2：手柄 4 要講清楚「右邊跟結算日」勾選時會暫停。
+        // ★ V10.10：lockTag（垂直鎖定）／slotTag（記憶表）已移除。
+        string rsTag = rightFollowSettle ? "　[跟結算日・唔跟手柄]" : ""
+        // ★ v9.4：適應觸發時，手柄標記本身喺畫面外 → 標籤要講清楚，
+        //   否則又會出現「拖咗但方框冇反應」嘅誤解（v8.3 教訓）。
+        string adaptTag = adapted ? "　[已適應・原手柄唔屬當前標的]" : ""
+        // ★ V10.1：明確指出「可拖曳標記喺畫面外 → 見唔到、拖唔到」
+        //   根因：input.time() / input.price() 嘅標記由 TradingView 按數值擺位，
+        //         數值唔喺可見範圍 → 標記完全消失。
+        //   ★ 唔講清楚嘅話，用戶會以為「手柄壞咗」（v8.3 教訓）。
+        // ★ V10.7：均價模式嘅三種狀態都要講清楚（接手 / 重設中 / 未設定）
+        // ★ V10.8：均價模式三種狀態（已接手 / 重設中 / 未接手 → 用滑桿）
+        string maTag1 = useMA ? (botHandleOK ? "　[★ 均價起步 → 已由手柄接手]" : maForce ? "　[★ 已按「重設返均價起步」→ 暫時唔理手柄]" : maUseHandle ? "　[★ 想拖：狀態欄有建議值]" : "　[★ 均價起步・手柄未接手（用「整體上下移」滑桿）]") : ""
+        string maTag3 = useMA ? (topHandleOK ? "　[★ 均價起步 → 已由手柄接手]" : maForce ? "　[★ 已按「重設返均價起步」→ 暫時唔理手柄]" : maUseHandle ? "　[★ 想拖：狀態欄有建議值]" : "　[★ 均價起步・手柄未接手（用「整體上下移」滑桿）]") : ""
+        string offTag1 = useMA ? maTag1 : botForeign ? "　[⚠ 已適應・圓點喺畫面外・拖唔到]" : botOn ? "" : "　[⚠ 未設定價格 → 方框自動擺位]"
+        string offTag2 = leftOn ? "" : "　[⚠ 日期喺畫面外・拖唔到 → 請向左滾動]"
+        string offTag3 = useMA ? maTag3 : topForeign ? "　[⚠ 已適應・圓點喺畫面外・拖唔到]" : topOn ? "" : "　[⚠ 未設定價格 → 方框自動擺位]"
+        string offTag4 = (rightFollowSettle or rightOn) ? "" : "　[⚠ 日期喺畫面外・拖唔到 → 請向右滾動]"
+        f_handle(xLeftBar + boxWBars / 2, yBot + cellH * 0.30, "▲ 手柄2 → 底邊（上下拖）" + adaptTag + offTag1, cH2, xUseBar)
+        f_handle(xLeftBar, yBot + boxH / 2, "◀ 手柄3 → 左邊（左右拖）" + offTag2, cH3, xUseBar)
+        f_handle(xLeftBar + boxWBars / 2, yTop - cellH * 0.30, "▼ 手柄1 → 頂邊（上下拖）" + adaptTag + offTag3, cH1, xUseBar)
+        f_handle(xRightBar, yBot + boxH * 0.25, "▶ 手柄4 → 右邊（左右拖）" + rsTag + offTag4, cH4, xUseBar)
+
+    // ═══ 狀態標籤 ═══
+    if showInfo
+        // ★ V10.10：記憶表已移除 → 手柄狀態只剩「均價起步 / 已設定 / 未設定」。
+        // ★ V10.4：未設定（=0）時亦要顯示【建議值】—— 否則用戶唔知要打咩數先拖得到。
+        // ★ V10.7：均價模式加分支 —— 講清楚「起步位 / 已接手 / 重設中」三種狀態
+        string hTxt1 = useMA ? (botHandleOK ? "★ 均價起步 → 手柄已接手 " + str.tostring(hBot, "#.####") + "（起步位 " + str.tostring(maBotP + maOff, "#.####") + "）" + (botFar ? "　⚠ 離均價位好遠（可能係上隻股票殘留）" : "") : maForce ? "★ 均價起步 " + str.tostring(maBotP + maOff, "#.####") + "（已按重設・暫時唔理手柄 " + str.tostring(hBot, "#.####") + "）" : maUseHandle ? "★ 均價起步 " + str.tostring(maBotP + maOff, "#.####") + "　★ 想拖：喺設定「★ 底邊價格」打 " + str.tostring(yBot, "#.####") : "★ 均價起步 " + str.tostring(maBotP + maOff, "#.####") + "（手柄未接手・用「整體上下移」滑桿調）　★ 想拖圓點：先開「★ 用手柄接手」再喺「★ 底邊價格」打 " + str.tostring(yBot, "#.####")) : not botOn ? "○ 未設定（=0）→ 方框自動擺位　★ 想拖：喺設定打 " + str.tostring(yBot, "#.####") : botOnEff ? "✓ 已設定 " + str.tostring(hBot, "#.####") : "⚠ 原值 " + str.tostring(hBot, "#.####") + " 唔屬當前標的 → 建議改為 " + str.tostring(yBot, "#.####")
+        // ★ V10.1：唔可以再一律寫「未設定」—— 明明有設定，只係唔喺畫面內。
+        string hTxt2 = leftOn ? "✓ 已設定 " + str.format_time(int(hLeft), "yyyy-MM-dd") + "（↔ 邊線差 " + str.tostring(xLeftBar - f_tsToBar(float(hLeft)), "#.##") + " 棒）" : "⚠ 日期 " + str.format_time(int(hLeft), "yyyy-MM-dd") + " 喺有效範圍外 → 左邊改用自動推算"
+        string hTxt3 = useMA ? (topHandleOK ? "★ 均價起步 → 手柄已接手 " + str.tostring(hTop, "#.####") + "（起步位 " + str.tostring(maTopP + maOff, "#.####") + "）" + (topFar ? "　⚠ 離均價位好遠（可能係上隻股票殘留）" : "") : maForce ? "★ 均價起步 " + str.tostring(maTopP + maOff, "#.####") + "（已按重設・暫時唔理手柄 " + str.tostring(hTop, "#.####") + "）" : maUseHandle ? "★ 均價起步 " + str.tostring(maTopP + maOff, "#.####") + "　★ 想拖：喺設定「★ 頂邊價格」打 " + str.tostring(yTop, "#.####") : "★ 均價起步 " + str.tostring(maTopP + maOff, "#.####") + "（手柄未接手・用「整體上下移」滑桿調）　★ 想拖圓點：先開「★ 用手柄接手」再喺「★ 頂邊價格」打 " + str.tostring(yTop, "#.####")) : not topOn ? "○ 未設定（=0）→ 方框自動擺位　★ 想拖：喺設定打 " + str.tostring(yTop, "#.####") : topOnEff ? "✓ 已設定 " + str.tostring(hTop, "#.####") : "⚠ 原值 " + str.tostring(hTop, "#.####") + " 唔屬當前標的 → 建議改為 " + str.tostring(yTop, "#.####")
+        string hTxt4 = rightFollowSettle ? "★ 跟結算日（手柄 4 暫停）" : rightOn ? "✓ 已設定 " + str.format_time(int(hRight), "yyyy-MM-dd") + "（↔ 邊線差 " + str.tostring(xRightBar - f_tsToBar(float(hRight)), "#.##") + " 棒）" : "⚠ 日期 " + str.format_time(int(hRight), "yyyy-MM-dd") + " 喺有效範圍外 → 右邊自動用結算日"
+        string edgeDate = str.format_time(int(xAnchor), "yyyy-MM-dd")
+        bool inRight = float(xAnchor) <= visR
+        bool inLeft = float(xAnchor) >= visL
+        string xWarn = inRight and inLeft ? "✓ 喺畫面內" : inRight ? "⚠ 喺畫面【左邊】之外 → 請向左滾動" : "⚠ 喺畫面【右邊】之外 → 請向右滾動（或按 Alt+→ 跳到最新）"
+        // ★ V10.10 精簡：⑪ 對位差異數字（showDiff / diffTxt）已移除。
+        // ★ V10.10 精簡：★ 各標的記憶表已移除 → 唔再顯示表狀態／可複製行。
+        // ── v9.4 自動適應提示 ──
+        string adaptTxt = ""
+        if adaptShow and adapted and (not useMA)
+            string aTxt = ""
+            if botForeign
+                aTxt := "　手柄2（底邊）原值 " + str.tostring(hBot, "#.####")
+            if topForeign
+                aTxt := aTxt + "　手柄1（頂邊）原值 " + str.tostring(hTop, "#.####")
+            adaptTxt = "\n★ 已自動適應（切換標的正常現象）→ 方框改用現價自動擺位\n　" + aTxt + "\n　（你嘅手柄值冇被改，切返原股票即 100% 還原）"
+        // ── ★ V10.1：左右手柄「喺畫面外」診斷 ──
+        //   根因：input.time() 嘅可拖曳標記由 TradingView 按【日期】擺位。
+        //         日期一旦喺可見範圍之外 → 標記完全消失、亦拖唔到。
+        //         ★ 呢個唔係壞咗，係 TradingView 嘅固有行為。
+        //   所以一定要喺狀態標籤講清楚「邊個手柄、咩日期、喺唔喺畫面內」。
+        // ── ★ V10.1 / V10.4：左右手柄標記「喺畫面外」提示（純提示，唔影響幾何）──
+        //   ★ V10.4：幾何判定已改用固定時間窗（唔再受滾動影響）；
+        //     呢度只係話你知「標記而家喺唔喺你眼前」，方便你去搵返佢。
+        //   ★ hLeftVisible / hRightVisible 已喺上方（③ 右邊段）宣告 → 呢度直接重用。
+        string offHint = ""
+        if (not hLeftVisible) or (not hRightVisible)
+            offHint := "\nℹ 左右手柄標記唔喺你而家見到嘅範圍（方框照跟日期，唔影響對位）"
+            offHint := offHint + "\n　 左邊手柄 " + str.format_time(int(hLeft), "yyyy-MM-dd") + (hLeftVisible ? "　✓ 喺畫面內" : "　★ 喺畫面外")
+            offHint := offHint + "\n　 右邊手柄 " + str.format_time(int(hRight), "yyyy-MM-dd") + (hRightVisible ? "　✓ 喺畫面內" : "　★ 喺畫面外")
+            offHint := offHint + "\n　 想見到標記：① 左右滾動圖表　② 右鍵指標 →「重設點 / Reset points」→ 點圖表"
+            offHint := offHint + "\n　　　　　　　③ 設定 →「★ 左邊日期 / ★ 右邊日期」直接打一個畫面內嘅日期"
+        // ── ★ V10.4：上下手柄「拖唔到」萬用診斷 ──
+        //   根因（兩種情況都一樣）：input.price() 嘅可拖曳圓點由 TradingView 按【數值】擺位，
+        //   數值一旦落喺可見價格範圍之外 → 圓點完全消失、亦拖唔到。
+        //     情況 A：手柄未設定（= 0）→ 圓點喺價格 0 → 永遠喺畫面外
+        //             ★ 呢個就係「2318 未見到手拉線」嘅情況（388 有設過值所以睇得到）。
+        //     情況 B：手柄值屬上隻股票（已適應）→ 圓點喺舊價位 → 畫面外
+        //   ★ 兩種都要【明確講出建議值】，否則用戶唔知要打咩數。
+        string adaptHint = ""
+        // ★ V10.7：用 botSet / topSet（唔可以用 botOn / topOn）——
+        //   均價模式 botOn 永遠 true，用咗就會令「手柄未設定、圓點喺畫面外」永遠唔提示。
+        // ★ V10.8：再加 handleNeeded —— 均價模式未開「★ 用手柄接手」時，
+        //   手柄根本唔參與 → 唔應該提示「圓點喺畫面外」（否則誤導）。
+        bool handleNeeded = (not useMA) or maUseHandle
+        bool vBlock1 = handleNeeded and (botForeign or not botSet)
+        bool vBlock3 = handleNeeded and (topForeign or not topSet)
+        if vBlock1 or vBlock3
+            adaptHint := "\n⚠ 上下手柄喺圖上見唔到 → 拖唔到（★ 唔係壞咗，係 TradingView 固有行為）"
+            if vBlock1
+                adaptHint := adaptHint + "\n　 手柄2（底邊）" + (botForeign ? "原值 " + str.tostring(hBot, "#.####") + " 屬上隻股票" : "未設定（=0）") + " → 圓點喺畫面外"
+            if vBlock3
+                adaptHint := adaptHint + "\n　 手柄1（頂邊）" + (topForeign ? "原值 " + str.tostring(hTop, "#.####") + " 屬上隻股票" : "未設定（=0）") + " → 圓點喺畫面外"
+            adaptHint := adaptHint + "\n　 兩個解決方法（任揀一個）："
+            adaptHint := adaptHint + "\n　　① 右鍵指標 →「重設點 / Reset points」→ 喺圖上點一下（最簡單・推薦）"
+            adaptHint := adaptHint + "\n　　② 設定 →「手柄 2 · 底邊」打 " + str.tostring(yBot, "#.####") + "；「手柄 1 · 頂邊」打 " + str.tostring(yTop, "#.####")
+            adaptHint := adaptHint + "\n　 ※ 唔想搞手柄都可以：⑤「垂直位移（% 格高）」＋④「自動高度 %」一樣可以上下調方框"
+            if useMA
+                adaptHint := adaptHint + "\n　 ★ 均價模式：方框而家喺均價起步位（底 " + str.tostring(maBotP + maOff, "#.####") + " / 頂 " + str.tostring(maTopP + maOff, "#.####") + "）"
+                adaptHint := adaptHint + "\n　　 打一次數值 → 圓點出現喺【同一位置】（方框唔會郁）→ 之後就可以自由拖，拖幾遠都得"
+                adaptHint := adaptHint + "\n　 ※ 唔想搞手柄：用「★ 整體上下移（% 均價）」滑桿，一樣可以上下移方框"
+        // ── 垂直狀態 ＋ 距離現價 ──
+        // ★ V10.8：均價模式加分支（接手 / 單邊接手 / 純起步）+ 顯示上下移
+        string maShiftTxt = maShiftPct != 0.0 ? "　上下移 " + (maShiftPct > 0 ? "+" : "") + str.tostring(maShiftPct, "#.##") + "%" : ""
+        string yMode = useMA ? (botHandleOK and topHandleOK ? "★ 均價起步 → 手柄已接手" : botHandleOK or topHandleOK ? "★ 均價起步（一邊已接手）" : "★ 均價起步（" + str.tostring(maDays) + " 天 ±" + str.tostring(maPct, "#.##") + "%）" + maShiftTxt) : adapted ? "★ 已自動適應新標的" : (botOnEff or topOnEff) ? "跟隨手柄" : "自動貼近現價"
+        float midBox = (yBot + yTop) / 2.0
+        float distPt = midBox - close
+        float distPct = close != 0 ? distPt / close * 100.0 : 0.0
+        string distTxt = "方框中心距現價 " + (distPt >= 0 ? "+" : "") + str.tostring(distPt, "#.##") + "（" + (distPct >= 0 ? "+" : "") + str.tostring(distPct, "#.##") + "%）"
+        string setupHint = (not botOn and not leftOn and not topOn and not rightOn) ? "\n⚠ 四個手柄都未設定（或唔喺畫面內）→ 方框用自動位置。\n　 想拖：右鍵指標 →「重設點 / Reset points」→ 點圖表" : ""
+        // ★ V10.0：未來錨點提示 + 引擎／降級狀態
+        string xFut = float(xAnchor) > float(time) ? "　（未來錨點：日曆感知外推 " + str.tostring(barsPerDay, "#.###") + " 棒／日曆日）" : ""
+        string xEng = "　引擎：" + xMode + (not useBarIdx ? "（邊線貼實手柄：精確時間戳，四段亦均勻）" : xDegraded ? "（⚠ 超出可繪範圍 → 已降級去時間模式，邊線保持對齊）" : snapQ4 ? "（分割優先：已吸附 4 的倍數 → 四段 0 誤差）" : "（棒索引：round 到整數棒，邊線可能偏離手柄 ≤0.5 棒）")
+        string infoTxt = "四邊圖 V10.12 · " + syminfo.ticker + " · " + str.tostring(drawn) + " 格 · 斜線：" + diagStyle + xEng + "\n格寬 " + str.tostring(cellWBars, "#.##") + " 棒　← 拉圖上嘅【圓點標記】" + "\n① 底邊（手柄 2）：" + hTxt1 + "\n② 左邊（手柄 3）：" + hTxt2 + "\n③ 頂邊（手柄 1）：" + hTxt3 + "\n④ 右邊（手柄 4）：" + hTxt4 + adaptTxt + offHint + adaptHint + "\n垂直：" + yMode + "　" + distTxt + "\n方框 " + str.tostring(yBot, "#.####") + " ~ " + str.tostring(yTop, "#.####") + "　現價 " + str.tostring(close, "#.####") + "\n右邊 " + edgeDate + "　" + xWarn + xFut + setupHint
+        f_cap(xLeftBar + boxWBars / 2, yBot, infoTxt, xUseBar)

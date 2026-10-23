@@ -1,0 +1,139 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ekmchiu
+
+//@version=6
+indicator("GridWB3 V7", "GridWB3 V7", overlay = true, max_lines_count = 500, max_boxes_count = 50)
+
+// --- Inputs ---
+grpScale   = "Auto-Scaling Mode"
+scaleMode  = input.string("Full Visible Screen", "Scaling Mode", options = ["Full Visible Screen", "Fixed Historical Dates"], group = grpScale)
+autoGrids  = input.int(3, "Grids Count", minval = 1, maxval = 7, group = grpScale)
+
+grpCalc    = "Fixed Date Settings (Used if Mode = Fixed Historical Dates)"
+startDate  = input.time(timestamp("2024-12-20 00:00:00 +0800"), "Start Date", group = grpCalc)
+endDate    = input.time(timestamp("2027-12-17 00:00:00 +0800"), "End Date", group = grpCalc)
+
+// --- Style Inputs ---
+edgeAdjust = input.int(0, "Fine-tune right edge (bars)", minval = -10, maxval = 10, group = "Grid")
+gridCol    = input.color(color.new(color.blue, 0),  "Color A (grid 0,2,4...)", group = "Style")
+altCol     = input.color(color.new(color.red, 0),   "Color B (grid 1,3,5...)", group = "Style")
+diagCol    = input.color(color.new(color.blue, 0),  "Slope color",            group = "Style")
+fillCol    = input.color(color.new(color.gray, 92), "Box fill",               group = "Style")
+gridTransp = input.int(40, "Grid transparency", minval = 0, maxval = 100, group = "Style")
+diagTransp = input.int(40, "Slope transparency", minval = 0, maxval = 100, group = "Style")
+gridW      = input.int(1, "Grid width",  minval = 1, maxval = 4, group = "Style")
+diagW      = input.int(1, "Slope width", minval = 1, maxval = 4, group = "Style")
+
+// Apply transparency
+colGrid = color.new(gridCol, gridTransp)
+colAlt  = color.new(altCol,  gridTransp)
+colDiag = color.new(diagCol, diagTransp)
+
+// --- Track Bar Indices for Visible Screen ---
+int visLeftBar  = ta.valuewhen(time <= chart.left_visible_bar_time, bar_index, 0)
+int visRightBar = ta.valuewhen(time <= chart.right_visible_bar_time, bar_index, 0)
+
+// --- Execution on Last Bar ---
+if barstate.islast
+    int biL = 0
+    int biR = 0
+    float pTop = 0.0
+    float pBot = 0.0
+
+    if scaleMode == "Full Visible Screen"
+        // Get visible bar index boundaries
+        biL := na(visLeftBar) ? 0 : visLeftBar
+        biR := (na(visRightBar) ? bar_index : visRightBar) + edgeAdjust
+
+        // Calculate highest high and lowest low across the visible range
+        int visibleBars = math.max(1, bar_index - biL + 1)
+        pTop := ta.highest(high, visibleBars)
+        pBot := ta.lowest(low, visibleBars)
+    else
+        // Fallback to historical date calculations
+        biL := ta.valuewhen(time <= startDate, bar_index, 0)
+        biR := ta.valuewhen(time <= endDate, bar_index, 0)
+        if endDate > time
+            biR := bar_index + int(math.round((endDate - time) / (timeframe.in_seconds() * 1000.0))) + edgeAdjust
+        
+        int spanBars = math.max(1, bar_index - biL + 1)
+        pTop := ta.highest(high, spanBars)
+        pBot := ta.lowest(low, spanBars)
+
+    float dh = pTop - pBot
+    int span = biR - biL
+
+    // Outer box
+    box.new(biL, pTop, biR, pBot,
+         border_color = colGrid, border_width = gridW, bgcolor = fillCol,
+         xloc = xloc.bar_index)
+
+    // Unit boundaries
+    if autoGrids > 1
+        for i = 1 to autoGrids - 1
+            int bx = biL + int(math.round(span * i / float(autoGrids)))
+            line.new(bx, pTop, bx, pBot, xloc = xloc.bar_index, color = colGrid, width = gridW)
+
+    // Per unit grid & slopes
+    for i = 0 to autoGrids - 1
+        int xL = biL + int(math.round(span * i / float(autoGrids)))
+        int xR = biL + int(math.round(span * (i + 1) / float(autoGrids)))
+        int wu = xR - xL
+
+        int q1 = xL + int(math.round(wu * 0.25))
+        int q2 = xL + int(math.round(wu * 0.50))
+        int q3 = xL + int(math.round(wu * 0.75))
+        int xM = q2
+
+        lineCol = i % 2 == 0 ? colGrid : colAlt
+
+        float yB = pBot
+        float yT = pTop
+        float yM = pBot + dh * 0.5
+
+        // Horizontal lines
+        line.new(xL, pBot + dh * 0.25, xR, pBot + dh * 0.25, xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(xL, pBot + dh * 0.5,  xR, pBot + dh * 0.5,  xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(xL, pBot + dh * 0.75, xR, pBot + dh * 0.75, xloc = xloc.bar_index, color = lineCol, width = gridW)
+
+        // Vertical lines
+        line.new(q1, pTop, q1, pBot, xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(q2, pTop, q2, pBot, xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(q3, pTop, q3, pBot, xloc = xloc.bar_index, color = lineCol, width = gridW)
+
+        // Slopes
+        line.new(xL, yT, xM, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yT, xR, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yT, xR, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yB, xM, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yB, xR, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yB, xR, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yT, xM, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yT, xL, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yT, xL, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yB, xM, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yB, xL, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yB, xL, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+
+    // --- Bottom-Left Info Table ---
+    var table infoTable = table.new(position = position.bottom_right, columns = 2, rows = 6, 
+                                    bgcolor = color.new(color.yellow, 20), 
+                                    border_width = 1, border_color = color.gray)
+    
+    table.cell(infoTable, 0, 0, "Param", bgcolor = color.navy, text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 0, syminfo.ticker + " (" + scaleMode + ")", bgcolor = color.navy, text_color = color.white, text_size = size.small)
+
+    table.cell(infoTable, 0, 1, "Left Bar / Start", text_color = color.gray, text_size = size.small)
+    table.cell(infoTable, 1, 1, str.tostring(biL), text_color = color.white, text_size = size.small)
+
+    table.cell(infoTable, 0, 2, "High Price (p1)", text_color = color.gray, text_size = size.small)
+    table.cell(infoTable, 1, 2, str.tostring(pTop, "#.##"), text_color = color.green, text_size = size.small)
+
+    table.cell(infoTable, 0, 3, "Right Bar / End", text_color = color.gray, text_size = size.small)
+    table.cell(infoTable, 1, 3, str.tostring(biR), text_color = color.white, text_size = size.small)
+
+    table.cell(infoTable, 0, 4, "Low Price (p2)", text_color = color.gray, text_size = size.small)
+    table.cell(infoTable, 1, 4, str.tostring(pBot, "#.##"), text_color = color.red, text_size = size.small)
+
+    table.cell(infoTable, 0, 5, "Grids Count", text_color = color.gray, text_size = size.small)
+    table.cell(infoTable, 1, 5, str.tostring(autoGrids), text_color = color.yellow, text_size = size.small)

@@ -1,0 +1,141 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ekmchiu
+
+//@version=6
+indicator("GridWB3 Auto-Calculated Config", "GridWB3 Auto", overlay = true, max_lines_count = 500, max_boxes_count = 50)
+
+// --- Struct Definition ---
+type SymbolConfig
+    int   t1
+    float p1
+    int   t2
+    float p2
+    int   grids
+
+// --- Function to Calculate Anchors Dynamically ---
+getDynamicConfig(int startTime, int endTime, int defaultGrids) =>
+    var float maxClose = na
+    var float minClose = na
+    
+    // Scan historical bars starting from the start time
+    if time >= startTime
+        if na(maxClose) or close > maxClose
+            maxClose := close
+        if na(minClose) or close < minClose
+            minClose := close
+
+    // Fallbacks if data before startTime is incomplete
+    float safeP1 = na(maxClose) ? high : maxClose
+    float safeP2 = na(minClose) ? low  : minClose
+    
+    SymbolConfig.new(endTime, safeP1, startTime, safeP2, defaultGrids)
+
+// --- Dynamic Date Inputs ---
+grpCalc   = "Auto-Calculation Settings"
+startDate = input.time(timestamp("2024-12-20 00:00:00 +0800"), "Start Date (Lowest Price)", group = grpCalc)
+endDate   = input.time(timestamp("2027-12-17 00:00:00 +0800"), "End Date (Target Grid Edge)", group = grpCalc)
+autoGrids = input.int(3, "Grids Count", minval = 1, maxval = 7, group = grpCalc)
+
+// --- Execute Dynamic Calculation ---
+SymbolConfig cfg = getDynamicConfig(startDate, endDate, autoGrids)
+
+int   t1    = cfg.t1
+float p1    = cfg.p1
+int   t2    = cfg.t2
+float p2    = cfg.p2
+int   grids = cfg.grids
+
+// --- Edge Fine-Tuning & Style Inputs ---
+edgeAdjust = input.int(0, "Fine-tune right edge (bars)", minval = -10, maxval = 10, group = "Grid",
+     tooltip = "Shift the future right edge: -N = N bars left, +N = N bars right.")
+
+gridCol    = input.color(color.new(color.blue, 0),  "Color A (grid 0,2,4...)", group = "Style")
+altCol     = input.color(color.new(color.red, 0),   "Color B (grid 1,3,5...)", group = "Style")
+diagCol    = input.color(color.new(color.blue, 0),  "Slope color",            group = "Style")
+fillCol    = input.color(color.new(color.gray, 92), "Box fill",               group = "Style")
+gridTransp = input.int(40, "Grid transparency", minval = 0, maxval = 100, group = "Style")
+diagTransp = input.int(40, "Slope transparency", minval = 0, maxval = 100, group = "Style")
+gridW      = input.int(1, "Grid width",  minval = 1, maxval = 4, group = "Style")
+diagW      = input.int(1, "Slope width", minval = 1, maxval = 4, group = "Style")
+
+// --- Geometry ---
+tLeft  = math.min(t1, t2)
+tRight = math.max(t1, t2)
+pTop   = math.max(p1, p2)
+pBot   = math.min(p1, p2)
+float dh = pTop - pBot
+
+int biL      = ta.valuewhen(time <= tLeft,  bar_index, 0)
+int biR_past = ta.valuewhen(time <= tRight, bar_index, 0)
+
+colGrid = color.new(gridCol, gridTransp)
+colAlt  = color.new(altCol,  gridTransp)
+colDiag = color.new(diagCol, diagTransp)
+
+// --- Drawing Logic ---
+if barstate.islast
+
+    // Right edge bar index
+    int biR = biR_past
+    if tRight > time
+        if timeframe.in_seconds() == 86400
+            int calDays  = int(math.ceil((tRight - time) / 86400000))
+            int weekends = int(math.floor(calDays / 7)) * 2
+            int futBars  = math.max(0, calDays - weekends + edgeAdjust - 1)
+            biR := bar_index + futBars
+        else
+            biR := bar_index + int(math.round((tRight - time) / (timeframe.in_seconds() * 1000.0)))
+
+    int span = biR - biL
+
+    // Outer box
+    box.new(biL, pTop, biR, pBot,
+         border_color = colGrid, border_width = gridW, bgcolor = fillCol,
+         xloc = xloc.bar_index)
+
+    // Unit boundaries
+    if grids > 1
+        for i = 1 to grids - 1
+            int bx = biL + int(math.round(span * i / float(grids)))
+            line.new(bx, pTop, bx, pBot, xloc = xloc.bar_index, color = colGrid, width = gridW)
+
+    // Per unit grid & slopes
+    for i = 0 to grids - 1
+        int xL = biL + int(math.round(span * i / float(grids)))
+        int xR = biL + int(math.round(span * (i + 1) / float(grids)))
+        int wu = xR - xL
+
+        int q1 = xL + int(math.round(wu * 0.25))
+        int q2 = xL + int(math.round(wu * 0.50))
+        int q3 = xL + int(math.round(wu * 0.75))
+        int xM = q2
+
+        lineCol = i % 2 == 0 ? colGrid : colAlt
+
+        float yB = pBot
+        float yT = pTop
+        float yM = pBot + dh * 0.5
+
+        // Horizontal lines
+        line.new(xL, pBot + dh * 0.25, xR, pBot + dh * 0.25, xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(xL, pBot + dh * 0.5,  xR, pBot + dh * 0.5,  xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(xL, pBot + dh * 0.75, xR, pBot + dh * 0.75, xloc = xloc.bar_index, color = lineCol, width = gridW)
+
+        // Vertical lines
+        line.new(q1, pTop, q1, pBot, xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(q2, pTop, q2, pBot, xloc = xloc.bar_index, color = lineCol, width = gridW)
+        line.new(q3, pTop, q3, pBot, xloc = xloc.bar_index, color = lineCol, width = gridW)
+
+        // Slopes
+        line.new(xL, yT, xM, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yT, xR, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yT, xR, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yB, xM, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yB, xR, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xL, yB, xR, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yT, xM, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yT, xL, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yT, xL, yB, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yB, xM, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yB, xL, yM, xloc = xloc.bar_index, color = colDiag, width = diagW)
+        line.new(xR, yB, xL, yT, xloc = xloc.bar_index, color = colDiag, width = diagW)
